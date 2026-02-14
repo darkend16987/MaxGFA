@@ -71,7 +71,10 @@ export default function LotCard({ lotResult, expanded, onToggle }) {
       {/* Metrics Row */}
       <div style={{ padding: "0 20px 16px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
         {/* K ratio */}
-        <div>
+        <div
+          title={"Hệ số sử dụng đất = Tổng DT sàn tính K / DT đất lô\n= " + fmtNum(lr.totalCountedGFA, 0) + " / " + fmtNum(lr.lot.area, 0) + " = " + lr.kAchieved.toFixed(3) + "\nRàng buộc: K ≤ " + lr.kMax.toFixed(2) + " (QCVN)"}
+          style={{ cursor: "help" }}
+        >
           <div style={{ fontSize: 10, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
             Hệ số SDD
           </div>
@@ -82,7 +85,10 @@ export default function LotCard({ lotResult, expanded, onToggle }) {
           <MiniBar value={lr.kAchieved} max={lr.kMax} color={colors.blue} />
         </div>
         {/* Density */}
-        <div>
+        <div
+          title={"Mật độ xây dựng = Tổng footprint / DT đất lô\n= Σ(DT điển hình) / " + fmtNum(lr.lot.area, 0) + " = " + (lr.densityAchieved * 100).toFixed(2) + "%\nRàng buộc: MĐXD ≤ " + (lr.densityMax * 100).toFixed(0) + "%"}
+          style={{ cursor: "help" }}
+        >
           <div style={{ fontSize: 10, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
             Mật độ XD
           </div>
@@ -93,7 +99,10 @@ export default function LotCard({ lotResult, expanded, onToggle }) {
           <MiniBar value={lr.densityAchieved} max={lr.densityMax} color={colors.purple} />
         </div>
         {/* Total GFA */}
-        <div>
+        <div
+          title={"DT sàn tính vào hệ số K cho lô này.\n= Σ(DT điển hình × " + lr.maxFloors + " tầng tính K)\n= " + fmtNum(lr.totalCountedGFA, 0) + " m²\nDT sàn thực (bao gồm tầng trừ): " + fmtNum(lr.totalActualGFA, 0) + " m²"}
+          style={{ cursor: "help" }}
+        >
           <div style={{ fontSize: 10, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
             Tổng DT sàn (tính K)
           </div>
@@ -113,7 +122,7 @@ export default function LotCard({ lotResult, expanded, onToggle }) {
           </div>
           {lr.wasScaled && (
             <div style={{ fontSize: 11, color: colors.amber, marginBottom: 8, padding: "6px 10px", background: "#78350f22", borderRadius: 6 }}>
-              * Đã scale xuống {(lr.scaleFactor * 100).toFixed(1)}% do vượt ràng buộc
+              * Toàn bộ mẫu tòa đã scale xuống {(lr.scaleFactor * 100).toFixed(1)}% (global) do có lô vượt ràng buộc
             </div>
           )}
           <div style={{ display: "grid", gap: 8 }}>

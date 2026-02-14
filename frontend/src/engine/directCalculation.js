@@ -2,9 +2,12 @@
 // DIRECT CALCULATION ENGINE
 // Phase A: Compute GFA, K, MĐXD for current configuration
 // ============================================================
-// This is the core computation that runs every time config changes.
-// It takes a project configuration and returns detailed results
-// for each lot, each building, and project-wide aggregates.
+// INVARIANT: Cùng mẫu tòa (building type) = cùng diện tích
+// điển hình ở MỌI lô. Scaling phải GLOBAL, không per-lot.
+//
+// Two-pass approach:
+//   Pass 1: Scan all lots → find global min scale factor
+//   Pass 2: Apply global scale → compute final results
 // ============================================================
 
 /**
@@ -25,7 +28,43 @@ export function calculateGFA(project) {
   const typeMap = new Map();
   buildingTypes.forEach((bt) => typeMap.set(bt.id, bt));
 
-  // Calculate each lot
+  // ============================================================
+  // PASS 1: Find GLOBAL scale factor
+  // Cùng mẫu = cùng diện tích → phải dùng chung 1 scale factor
+  // cho toàn bộ dự án thay vì scale riêng từng lô.
+  // ============================================================
+  let globalScaleFactor = 1;
+
+  lots.forEach((lot) => {
+    const assignment = assignments.find((a) => a.lotId === lot.id);
+    if (!assignment || assignment.buildings.length === 0) return;
+
+    const buildings = assignment.buildings
+      .map((btId) => typeMap.get(btId))
+      .filter(Boolean);
+    if (buildings.length === 0) return;
+
+    const maxFloors = lot.maxFloors;
+    const totalFootprint = buildings.reduce((sum, b) => sum + b.typicalArea, 0);
+
+    // K constraint: sum(typicalArea × maxFloors) / lotArea ≤ kMax
+    const rawK = (totalFootprint * maxFloors) / lot.area;
+    if (rawK > lot.kMax) {
+      globalScaleFactor = Math.min(globalScaleFactor, lot.kMax / rawK);
+    }
+
+    // Density constraint: sum(typicalArea) / lotArea ≤ densityMax
+    const rawDensity = totalFootprint / lot.area;
+    if (rawDensity > lot.densityMax) {
+      globalScaleFactor = Math.min(globalScaleFactor, lot.densityMax / rawDensity);
+    }
+  });
+
+  // ============================================================
+  // PASS 2: Compute results using globally-consistent areas
+  // adjustedTypicalArea = typicalArea × globalScaleFactor
+  // → Cùng mẫu tòa ở bất kỳ lô nào đều cùng giá trị
+  // ============================================================
   const lotResults = lots.map((lot) => {
     const assignment = assignments.find((a) => a.lotId === lot.id);
     if (!assignment || assignment.buildings.length === 0) {
@@ -45,25 +84,24 @@ export function calculateGFA(project) {
     const residentialFloors = maxFloors - commercialFloors;
     const deductionFloors = Math.ceil(maxFloors * deductionRate);
 
-    // Compute total footprint (sum of typical areas for density calculation)
-    const totalFootprint = buildings.reduce((sum, b) => sum + b.typicalArea, 0);
-    const densityAchieved = totalFootprint / lot.area;
-
     // Max GFA allowed by K constraint
     const maxGFAByK = lot.area * lot.kMax;
 
-    // Calculate GFA per building
+    // Calculate GFA per building using globally-scaled area
     const buildingDetails = buildings.map((bt) => {
-      const commercialGFA = bt.typicalArea * commercialFloors;
-      const residentialGFA = bt.typicalArea * residentialFloors;
+      const effArea = bt.typicalArea * globalScaleFactor;
+
+      const commercialGFA = effArea * commercialFloors;
+      const residentialGFA = effArea * residentialFloors;
       const countedGFA = commercialGFA + residentialGFA; // Tính vào hệ số K
-      const deductionGFA = bt.typicalArea * deductionFloors; // Trừ: KT, PCCC, tum...
+      const deductionGFA = effArea * deductionFloors; // Trừ: KT, PCCC, tum...
       const totalGFA = countedGFA + deductionGFA; // Tổng thực tế
 
       return {
         typeId: bt.id,
         type: bt,
-        typicalArea: bt.typicalArea,
+        typicalArea: bt.typicalArea, // Giá trị gốc từ config
+        adjustedTypicalArea: effArea, // Sau scaling (= gốc × globalScale)
         totalFloors: maxFloors,
         commercialFloors,
         residentialFloors,
@@ -73,43 +111,28 @@ export function calculateGFA(project) {
         countedGFA,
         deductionGFA,
         totalGFA,
+        // Compatibility fields — same values, using effective area
+        adjustedCountedGFA: countedGFA,
+        adjustedTotalGFA: totalGFA,
+        adjustedDeductionGFA: deductionGFA,
+        adjustedCommercialGFA: commercialGFA,
+        adjustedResidentialGFA: residentialGFA,
       };
     });
 
-    // Sum for the lot
+    // Lot sums (using effective areas)
+    const totalFootprint = buildingDetails.reduce((s, b) => s + b.adjustedTypicalArea, 0);
+    const densityAchieved = totalFootprint / lot.area;
     const totalCountedGFA = buildingDetails.reduce((s, b) => s + b.countedGFA, 0);
     const totalActualGFA = buildingDetails.reduce((s, b) => s + b.totalGFA, 0);
     const kAchieved = totalCountedGFA / lot.area;
 
-    // Check constraint violations
-    const isOverK = kAchieved > lot.kMax;
-    const isOverDensity = densityAchieved > lot.densityMax;
+    // Check if ORIGINAL (unscaled) config would violate constraints
+    const rawFootprint = buildings.reduce((s, b) => s + b.typicalArea, 0);
+    const isOverK = (rawFootprint * maxFloors) / lot.area > lot.kMax;
+    const isOverDensity = rawFootprint / lot.area > lot.densityMax;
 
-    // Auto-scale if constraints violated
-    let scaleFactor = 1;
-    if (isOverK) {
-      scaleFactor = Math.min(scaleFactor, maxGFAByK / totalCountedGFA);
-    }
-    if (isOverDensity) {
-      scaleFactor = Math.min(scaleFactor, (lot.area * lot.densityMax) / totalFootprint);
-    }
-
-    // Apply scale factor
-    const adjustedBuildings = buildingDetails.map((b) => ({
-      ...b,
-      adjustedTypicalArea: b.typicalArea * scaleFactor,
-      adjustedCountedGFA: b.countedGFA * scaleFactor,
-      adjustedTotalGFA: b.totalGFA * scaleFactor,
-      adjustedDeductionGFA: b.deductionGFA * scaleFactor,
-      adjustedCommercialGFA: b.commercialGFA * scaleFactor,
-      adjustedResidentialGFA: b.residentialGFA * scaleFactor,
-    }));
-
-    const adjTotalCounted = adjustedBuildings.reduce((s, b) => s + b.adjustedCountedGFA, 0);
-    const adjTotalActual = adjustedBuildings.reduce((s, b) => s + b.adjustedTotalGFA, 0);
-    const adjK = adjTotalCounted / lot.area;
-    const adjDensity = adjustedBuildings.reduce((s, b) => s + b.adjustedTypicalArea, 0) / lot.area;
-    const utilizationRate = adjK / lot.kMax;
+    const utilizationRate = lot.kMax > 0 ? kAchieved / lot.kMax : 0;
 
     // Status determination
     let status = "low";
@@ -118,24 +141,24 @@ export function calculateGFA(project) {
 
     return {
       lot,
-      buildings: adjustedBuildings,
+      buildings: buildingDetails,
       buildingCount: buildings.length,
-      totalCountedGFA: adjTotalCounted,
-      totalActualGFA: adjTotalActual,
-      kAchieved: adjK,
+      totalCountedGFA,
+      totalActualGFA,
+      kAchieved,
       kMax: lot.kMax,
-      densityAchieved: adjDensity,
+      densityAchieved,
       densityMax: lot.densityMax,
       utilizationRate,
-      scaleFactor,
+      scaleFactor: globalScaleFactor,
       status,
       maxFloors,
       isOverK,
       isOverDensity,
-      wasScaled: scaleFactor < 1,
+      wasScaled: globalScaleFactor < 1,
       // Additional metrics
-      remainingKCapacity: lot.kMax - adjK,
-      remainingDensityCapacity: lot.densityMax - adjDensity,
+      remainingKCapacity: lot.kMax - kAchieved,
+      remainingDensityCapacity: lot.densityMax - densityAchieved,
       maxAllowableGFA: maxGFAByK,
     };
   });
@@ -191,6 +214,7 @@ export function calculateGFA(project) {
     totalLots: lots.length,
     avgK,
     avgUtilization,
+    globalScaleFactor,
     // Check combined FAR constraint (QCVN 01:2021 Mục 2.6.3: ≤ 13 lần)
     combinedFAR: avgK,
     combinedFARCompliant: avgK <= 13,
