@@ -7,10 +7,38 @@ export default function DashboardTab({ result, expandedLots, toggleLot, optimiza
   const pt = result.projectTotal;
 
   const kpiCards = [
-    { label: "Tổng DT sàn (tính K)", value: fmtNum(pt.totalCountedGFA, 0), unit: "m²", color: colors.blue, icon: "◫" },
-    { label: "Tổng DT sàn thực", value: fmtNum(pt.totalActualGFA, 0), unit: "m²", color: colors.purple, icon: "▤" },
-    { label: "Hệ số SDD TB", value: pt.avgK.toFixed(2), unit: "lần", color: colors.green, icon: "K" },
-    { label: "Tỷ lệ tối ưu TB", value: (pt.avgUtilization * 100).toFixed(1) + "%", unit: "", color: colors.amber, icon: "%" },
+    {
+      label: "Tổng DT sàn (tính K)",
+      value: fmtNum(pt.totalCountedGFA, 0),
+      unit: "m²",
+      color: colors.blue,
+      icon: "◫",
+      tooltip: "Tổng diện tích sàn được TÍNH VÀO hệ số K theo QCVN.\nCông thức: Σ(DT điển hình × số tầng tính K) cho tất cả tòa.\nĐây là chỉ tiêu pháp lý chính, dùng để kiểm tra K = DT sàn / DT đất ≤ K max.",
+    },
+    {
+      label: "Tổng DT sàn thực",
+      value: fmtNum(pt.totalActualGFA, 0),
+      unit: "m²",
+      color: colors.purple,
+      icon: "▤",
+      tooltip: "Tổng diện tích sàn XÂY DỰNG THỰC TẾ, bao gồm cả tầng kỹ thuật, PCCC, tum thang máy, mái.\nLuôn > DT tính K vì có thêm tầng trừ (không vi phạm K).\nCông thức: DT tính K + Σ(DT điển hình × số tầng trừ).",
+    },
+    {
+      label: "Hệ số SDD TB",
+      value: pt.avgK.toFixed(2),
+      unit: "lần",
+      color: colors.green,
+      icon: "K",
+      tooltip: "Hệ số sử dụng đất trung bình toàn dự án.\nCông thức: Tổng DT sàn tính K / Tổng DT đất.\nQuy chuẩn QCVN 01:2021 yêu cầu ≤ 13 lần.",
+    },
+    {
+      label: "Tỷ lệ tối ưu TB",
+      value: (pt.avgUtilization * 100).toFixed(1) + "%",
+      unit: "",
+      color: colors.amber,
+      icon: "%",
+      tooltip: "Trung bình % K đạt được so với K max cho phép.\n100% = tận dụng tối đa hệ số K.\nMục tiêu: ≥ 90% (ngưỡng tối ưu mặc định).",
+    },
   ];
 
   return (
@@ -20,6 +48,7 @@ export default function DashboardTab({ result, expandedLots, toggleLot, optimiza
         {kpiCards.map((kpi, i) => (
           <div
             key={i}
+            title={kpi.tooltip}
             style={{
               background: colors.bgCardGradient,
               border: `1px solid ${colors.border}`,
@@ -27,6 +56,7 @@ export default function DashboardTab({ result, expandedLots, toggleLot, optimiza
               padding: "20px 24px",
               position: "relative",
               overflow: "hidden",
+              cursor: "help",
             }}
           >
             <div
