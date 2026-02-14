@@ -3,6 +3,7 @@ import DashboardTab from "./components/DashboardTab";
 import ConfigTab from "./components/ConfigTab";
 import TypesTab from "./components/TypesTab";
 import LegalTab from "./components/LegalTab";
+import SpreadsheetTab from "./components/SpreadsheetTab";
 import { calculateGFA, validateProject } from "./engine";
 import { runCombinedOptimization } from "./engine/optimizer";
 import { DEFAULT_PROJECT } from "./data/defaultProject";
@@ -23,6 +24,7 @@ import { colors, fonts, globalStyles } from "./styles/theme";
 
 const TABS = [
   { id: "dashboard", label: "Tổng quan" },
+  { id: "spreadsheet", label: "Bảng tính" },
   { id: "config", label: "Cấu hình" },
   { id: "types", label: "Mẫu tòa" },
   { id: "legal", label: "Pháp lý" },
@@ -376,6 +378,10 @@ export default function App() {
           />
         )}
 
+        {activeTab === "spreadsheet" && (
+          <SpreadsheetTab project={project} setProject={setProject} result={result} />
+        )}
+
         {activeTab === "config" && <ConfigTab project={project} setProject={setProject} />}
 
         {activeTab === "types" && <TypesTab project={project} setProject={setProject} />}
@@ -393,7 +399,7 @@ export default function App() {
           color: colors.textDim,
         }}
       >
-        GFA Optimizer v1.0 · Phase 1: Tối ưu Tổng Diện Tích Sàn · Built for INNO JSC
+        GFA Optimizer v1.5 · Tối ưu Tổng Diện Tích Sàn · Built for INNO JSC
       </footer>
     </div>
   );

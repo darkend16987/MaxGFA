@@ -5,3 +5,5 @@ export {
   runSmartOptimization,
   runCombinedOptimization,
 } from "./optimizer";
+export { explainResult } from "./explainability";
+export { reverseCalculate, findMaxFeasibleGFA } from "./reverseCalculation";
