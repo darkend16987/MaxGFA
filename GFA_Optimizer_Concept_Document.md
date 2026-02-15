@@ -1,6 +1,6 @@
 # GFA OPTIMIZER — Tối ưu Tổng Diện Tích Sàn Xây Dựng
 
-**Phiên bản:** 1.1 (Global Scaling Fix)
+**Phiên bản:** 2.0 (LP Solver + Phase 1 Rewrite)
 **Ngày:** 15/02/2026
 **Dự án:** Công cụ hỗ trợ tối ưu hóa diện tích sàn xây dựng cho các dự án bất động sản cao tầng  
 **Đối tượng sử dụng:** Kiến trúc sư (KTS), Tư vấn thiết kế, Chủ đầu tư, Bộ phận phát triển dự án
@@ -91,9 +91,10 @@ Trong đó:
 
 ### 2.4. Phân loại bài toán
 
-- **Loại:** Mixed-variable Optimization (biến liên tục f_t + biến rời rạc n_t)
-- **Độ phức tạp:** NP-hard tổng quát, nhưng tractable với quy mô thực tế (5-20 lô, 3-10 mẫu)
-- **Phương pháp phù hợp:** Grid search trên biến rời rạc + Linear Programming cho biến liên tục, hoặc Monte Carlo / Genetic Algorithm cho trường hợp phức tạp
+- **Loại (Phase 1):** Linear Programming thuần túy — biến liên tục S_t, ràng buộc tuyến tính
+- **Loại (Phase 2+):** Mixed-variable Optimization (biến liên tục S_t + biến rời rạc n_tầng) → NP-hard tổng quát, nhưng tractable với quy mô thực tế (5-20 lô, 3-10 mẫu)
+- **Phương pháp đã implement:** Two-Phase Simplex Method (LP) cho Phase 1, Monte Carlo fallback
+- **Phương pháp tương lai:** GA cho Phase 2+, LLM-assisted cho config và pháp lý
 
 ---
 
@@ -106,120 +107,145 @@ Trong đó:
         │
         ▼
 [Phase A] ── Tính toán trực tiếp (Direct Calculation)
-        │    Với config hiện tại → tính GFA, K, MĐXD mỗi lô
-        │    Nếu vi phạm → auto-scale xuống
+        │    Với S_t hiện tại → tính GFA, K, MĐXD mỗi lô
+        │    KHÔNG auto-scale — chỉ tính và báo cáo
         │
         ▼
-[Phase B] ── Tối ưu hóa lặp (Iterative Optimization)
-        │    800+ iterations, perturbation ±8% f_t
-        │    Chọn tổ hợp cho tổng GFA cao nhất + thỏa mãn constraints
+[Phase B] ── Tối ưu hóa LP (Linear Programming)
+        │    Giải chính xác bằng Simplex Method
+        │    Tìm S_t tối ưu cho từng mẫu tòa
+        │    + Monte Carlo fallback cho bài toán phi tuyến
         │
         ▼
 [Phase C] ── Tinh chỉnh (Refinement)  ← KTS thực hiện
-        │    Output: dải [f_min, f_max] cho mỗi mẫu
+        │    Output: dải [S_min, S_max] cho mỗi mẫu (sensitivity)
         │    KTS cân chỉnh tay trong dải này
         │
         ▼
-[OUTPUT: Kết quả tối ưu + Báo cáo]
+[OUTPUT: Kết quả tối ưu + Sensitivity Analysis + Báo cáo]
 ```
 
 ### 3.2. Phase A — Tính toán trực tiếp (Direct Calculation)
 
 Đây là engine tính toán cơ bản, chạy mỗi khi user thay đổi config.
 
-**INVARIANT:** Cùng mẫu tòa (building type) = cùng diện tích điển hình ở MỌI lô. Scaling phải GLOBAL, không per-lot.
+**INVARIANT:** Cùng mẫu tòa (building type) = cùng S_t (tổng DT sàn XD) ở MỌI lô.
 
-**Thuật toán Two-Pass (Global Scaling):**
+**Nguyên tắc v2.0:** Engine chỉ TÍNH, không SCALE. Nếu config hiện tại vi phạm ràng buộc → báo trạng thái "over", không tự động điều chỉnh. Muốn tìm giá trị tối ưu → gọi Optimizer (Phase B).
+
+**Thuật toán:**
 
 ```
-INPUT: lots[], buildingTypes[], assignments[], deductionRate, commercialFloors
+INPUT: lots[], buildingTypes[], assignments[], settings{}
 
 ──────────────────────────────────────────────────
-PASS 1: Tìm GLOBAL scale factor (lô chặt nhất quyết định)
+Biến quyết định Phase 1:
+  S_t = tổng DT sàn XD của 1 tòa mẫu t
+      = typicalArea × totalFloors (nếu chưa set totalGFA)
 ──────────────────────────────────────────────────
-globalScaleFactor = 1.0
 
-FOR mỗi lô j:
-  1. Lấy danh sách tòa từ assignments
-  2. totalFootprint = Σ(typicalArea) các tòa trong lô
-  3. Kiểm tra K constraint:
-     rawK = (totalFootprint × maxFloors) / lot.area
-     NẾU rawK > kMax:
-       globalScaleFactor = min(globalScaleFactor, kMax / rawK)
-  4. Kiểm tra Density constraint:
-     rawDensity = totalFootprint / lot.area
-     NẾU rawDensity > densityMax:
-       globalScaleFactor = min(globalScaleFactor, densityMax / rawDensity)
-
-→ Kết quả: globalScaleFactor = min trên TOÀN BỘ lô
-  (lô nào chặt nhất sẽ quyết định scale factor)
-
-──────────────────────────────────────────────────
-PASS 2: Tính kết quả với diện tích đã scale đồng nhất
-──────────────────────────────────────────────────
 FOR mỗi lô j:
   FOR mỗi tòa trong lô:
-     adjustedTypicalArea = typicalArea × globalScaleFactor
-     commercialGFA = adjustedTypicalArea × commercialFloors
-     residentialGFA = adjustedTypicalArea × (maxFloors - commercialFloors)
-     countedGFA = commercialGFA + residentialGFA  (tính vào hệ số K)
-     deductionGFA = adjustedTypicalArea × deductionFloors  (trừ: KT, PCCC, tum...)
-     totalGFA = countedGFA + deductionGFA  (tổng thực tế)
+     totalGFA = bt.totalGFA || bt.typicalArea × bt.totalFloors
+     countedGFA = totalGFA × (1 - deductionRate)   // Phase 1: deductionRate = 0
+
+  // Tính chỉ số lô
   kAchieved = Σ(countedGFA) / lot.area
+  densityAchieved = Σ(typicalArea) / lot.area
   utilizationRate = kAchieved / kMax
+
+  // Xác định trạng thái
+  status = "over"    nếu kAchieved > kMax hoặc density > densityMax
+         = "optimal" nếu utilizationRate ≥ kTargetMin (90%)
+         = "good"    nếu utilizationRate ≥ 80%
+         = "low"     nếu utilizationRate < 80%
 
 OUTPUT: lotResults[], typeAggregation{}, projectTotal{}
 ```
 
-**Tại sao Global Scaling thay vì Per-Lot Scaling?**
+**Tại sao bỏ Global Scaling?**
 
-Phiên bản cũ scale riêng từng lô (mỗi lô có scale factor riêng), dẫn đến BUG: cùng mẫu tòa Z1 nhưng ở lô CC2 có diện tích 1.441 m² trong khi ở lô CC4 có diện tích 1.476 m². Điều này vi phạm ràng buộc C5 (đồng nhất mẫu tòa).
+Phiên bản 1.x dùng Global Scale Factor — 1 hệ số duy nhất scale tất cả mẫu tòa đồng đều. Vấn đề: lô chặt nhất quyết định scale factor cho TOÀN BỘ dự án, dẫn đến các lô khác bị "kéo xuống" không cần thiết.
 
-Global scaling đảm bảo: `adjustedTypicalArea` của mỗi mẫu tòa là **duy nhất** trên toàn dự án, bất kể tòa đó nằm ở lô nào.
+Phiên bản 2.0 tách biệt: calculation engine chỉ TÍNH, LP optimizer tìm S_t tối ưu RIÊNG cho từng mẫu tòa (vẫn đảm bảo cùng mẫu = cùng giá trị). Hiệu quả hơn đáng kể vì mỗi mẫu tòa có thể được tối ưu độc lập trong biên ràng buộc.
 
-**Trade-off:** Một số lô có thể chưa tận dụng hết K max (vì bị constrain bởi lô chặt nhất). Đây là đúng hành vi — muốn tối ưu hơn thì chạy **Optimizer (Phase B)**, nó sẽ tìm `typicalArea` riêng cho từng mẫu tòa (thay đổi giá trị gốc, không phải scale đồng đều).
+### 3.3. Phase B — Tối ưu hóa LP (Linear Programming)
 
-### 3.3. Phase B — Tối ưu hóa lặp (Iterative Optimization)
+**Nhận thức cốt lõi:** Bài toán Phase 1 là **LP thuần túy** (Linear Programming). Cả hàm mục tiêu lẫn ràng buộc đều tuyến tính theo biến S_t.
 
-Sử dụng phương pháp Monte Carlo với perturbation:
+**Phương pháp chính: Two-Phase Simplex Method (chính xác, không random)**
+
+```
+INPUT: lots[], buildingTypes[], assignments[], bounds{}
+
+──────────────────────────────────────────────────
+Xây dựng bài toán LP chuẩn:
+──────────────────────────────────────────────────
+
+Biến:     x_t = S_t (tổng DT sàn XD của mẫu t), t = 1..T
+          T = số mẫu tòa (VD: 7 mẫu → 7 biến)
+
+Mục tiêu: MAX  Σ_t (N_t × x_t)
+          trong đó N_t = tổng số tòa mẫu t trên toàn dự án
+
+Ràng buộc (m lô):
+  Σ_t (n_tj × x_t) ≤ area_j × kMax_j     ∀ lô j = 1..m
+  trong đó n_tj = số tòa mẫu t trong lô j
+
+Biên:     lb_t ≤ x_t ≤ ub_t
+          (default: ±50% giá trị hiện tại)
+
+──────────────────────────────────────────────────
+Giải bằng Simplex:
+──────────────────────────────────────────────────
+
+1. Chuyển về dạng chuẩn (variable substitution cho lower bounds)
+2. Phase I Simplex: tìm BFS khả thi (basic feasible solution)
+3. Phase II Simplex: tối ưu hàm mục tiêu từ BFS
+4. Trích nghiệm: x_t* = S_t tối ưu cho từng mẫu
+5. Sensitivity analysis: tính [S_min, S_max] khả thi cho mỗi mẫu
+
+OUTPUT:
+  - solution{}: S_t tối ưu cho từng mẫu
+  - bindingLots[]: các lô đạt kMax (bottleneck)
+  - sensitivity{}: dải khả thi [min, max] cho mỗi mẫu
+  - improvement: % cải thiện so với baseline
+```
+
+**Ưu điểm LP so với Monte Carlo:**
+- **Chính xác:** Nghiệm tối ưu toàn cục, không phụ thuộc random
+- **Nhanh:** Single-pass, O(m²×T) thay vì O(iterations × m × T)
+- **Sensitivity:** Tự động tính dải khả thi cho KTS điều chỉnh
+- **Binding analysis:** Xác định lô nào là bottleneck → CĐT biết nên đàm phán tăng kMax ở đâu
+
+**Kết quả validate với dự án Đảo Vũ Yên:**
+- Giá trị Excel hiện tại gần tối ưu (chỉ cách LP optimum ~0.05%)
+- Binding lots: CC06 (lô chặt nhất, kMax = 7.62)
+- Nếu tăng kMax CC06 từ 7.62 → 8.5: tổng GFA tăng +1.60%
+
+### 3.4. Phương pháp bổ sung
+
+**Monte Carlo (fallback):** Giữ lại cho bài toán phi tuyến hoặc khi LP không áp dụng được.
 
 ```
 bestResult = null
 bestTotalGFA = 0
 
-FOR i = 1 TO 800:
-  1. Tạo bản sao buildingTypes
-  2. Perturbation: f_t_trial = f_t × (0.92 + random × 0.16)  // ±8%
-  3. Chạy Direct Calculation với f_t_trial
-  4. Kiểm tra: TẤT CẢ lô đều K ≤ K_max VÀ MĐXD ≤ MĐXD_max?
-  5. NẾU valid VÀ totalGFA > bestTotalGFA:
-     - Cập nhật bestResult, bestTotalGFA
+FOR i = 1 TO iterations:
+  1. Perturbation: S_t_trial = S_t × (1 ± perturbRange)
+  2. Chạy Direct Calculation với S_t_trial
+  3. NẾU tất cả lô status ≠ "over" VÀ totalGFA > bestTotalGFA:
+     → Cập nhật best
 
 RETURN bestResult
 ```
 
-### 3.4. Phase B nâng cao (Kế hoạch)
+**Combined Optimization:** LP → Monte Carlo refinement → chọn kết quả tốt nhất.
 
-Khi cần xử lý bài toán phức tạp hơn (nhiều lô, nhiều mẫu, nhiều biến thể), nâng cấp lên:
-
-**Phương pháp 1: Genetic Algorithm (GA)**
-- Population: 200 cá thể (mỗi cá thể = 1 bộ f_t cho tất cả mẫu)
-- Fitness: totalGFA nếu valid, penalty nếu vi phạm
-- Selection: Tournament selection
-- Crossover: Blend crossover (BLX-α)
-- Mutation: Gaussian perturbation
-- Generations: 500-1000
-
-**Phương pháp 2: Linear Programming (LP) relaxation**
-- Cố định số tầng → bài toán trở thành LP thuần túy
-- Iterate qua tổ hợp số tầng khả thi
-- Giải LP bằng Simplex cho mỗi tổ hợp
-- Chọn tổ hợp tốt nhất
-
-**Phương pháp 3: Sử dụng LLM (AI-assisted)**
-- LLM phân tích quy định pháp lý phức tạp → suggest deduction rules
-- LLM gợi ý phạm vi f_t hợp lý dựa trên kinh nghiệm thiết kế
-- LLM hỗ trợ config ban đầu từ mô tả text của dự án
+**Kế hoạch nâng cao (Phase 2+):**
+- Genetic Algorithm (GA) cho bài toán mixed-integer (khi số tầng cũng là biến)
+- LLM-assisted: AI phân tích văn bản pháp lý → suggest deduction rules
+- LLM gợi ý phạm vi S_t hợp lý dựa trên kinh nghiệm thiết kế
 
 ---
 
@@ -294,17 +320,17 @@ Ví dụ: Nếu một văn bản cho phép hệ số cao hơn, văn bản đó s
 
 ```
 ┌──────────────────────────────────────────────────┐
-│                   GFA OPTIMIZER                    │
+│                   GFA OPTIMIZER v2.0               │
 ├──────────────┬──────────────┬─────────────────────┤
 │  UI Layer    │  Engine      │  Data / IO          │
 │              │              │                     │
 │ Dashboard    │ DirectCalc   │ ProjectStore        │
-│ ConfigPanel  │ Iterative    │ LegalRulesDB        │
+│ ConfigPanel  │ LP Solver    │ LegalRulesDB        │
 │ TypeEditor   │ Optimizer    │ ExcelExporter        │
-│ LegalViewer  │ Constraint   │ ProjectImporter     │
-│ Comparison   │ Checker      │ TemplateManager     │
-│ (future)     │ (future:     │                     │
-│              │  LP, GA)     │                     │
+│ LegalViewer  │  (LP+MC)    │ ProjectImporter     │
+│ Comparison   │ Sensitivity  │ TemplateManager     │
+│ (future)     │ Explainer    │                     │
+│              │ ReverseCalc  │                     │
 └──────────────┴──────────────┴─────────────────────┘
 ```
 
@@ -332,8 +358,9 @@ Ví dụ: Nếu một văn bản cho phép hệ số cao hơn, văn bản đó s
 | Config lô đất | ✅ Done | Diện tích, K_max, MĐXD_max, tầng cao |
 | Config mẫu tòa | ✅ Done | Shape, diện tích điển hình, biến thể |
 | Phân bổ tòa → lô | ✅ Done | Gán mẫu tòa vào từng lô |
-| Direct Calculation | ✅ Done | Tính GFA, K, MĐXD tức thì |
-| Iterative Optimizer | ✅ Done | 800 iterations Monte Carlo |
+| Direct Calculation | ✅ Done | Tính GFA, K, MĐXD tức thì (v2.0: không auto-scale) |
+| LP Optimizer | ✅ Done | Simplex Method — nghiệm chính xác, sensitivity analysis |
+| Monte Carlo Fallback | ✅ Done | 800 iterations perturbation (backup cho bài toán phi tuyến) |
 | Dashboard | ✅ Done | KPI, lot cards, type summary |
 | Legal Rules Reference | ✅ Done | 4 văn bản chính |
 | Excel Export | 🔲 Todo | Export kết quả ra .xlsx |
@@ -396,15 +423,15 @@ Ví dụ: Nếu một văn bản cho phép hệ số cao hơn, văn bản đó s
 
 ### 7.1. Về tính toán
 
-1. **Coupling giữa các lô:** Đây là core difficulty. Không thể tối ưu từng lô riêng rồi ghép lại. Phải tối ưu đồng thời vì các tòa cùng mẫu ở các lô khác nhau phải có cùng diện tích.
+1. **Coupling giữa các lô:** Đây là core difficulty. Không thể tối ưu từng lô riêng rồi ghép lại. Phải tối ưu đồng thời vì các tòa cùng mẫu ở các lô khác nhau phải có cùng diện tích. LP solver xử lý chính xác điều này.
 
-2. **Global Scaling (không phải Per-Lot):** Phase A (Direct Calculation) dùng thuật toán two-pass: Pass 1 tìm scale factor nhỏ nhất toàn dự án (lô chặt nhất quyết định), Pass 2 áp dụng 1 scale factor duy nhất cho tất cả mẫu tòa. Điều này đảm bảo invariant "cùng mẫu = cùng diện tích" ở mọi lô. Trade-off: một số lô chưa tận dụng hết K max — đây là ý nghĩa đúng của direct calculation. Muốn tối ưu hơn → chạy Optimizer (Phase B).
+2. **LP thay vì Global Scaling:** Phiên bản 2.0 dùng LP Simplex thay cho Global Scale Factor. LP tìm S_t tối ưu **riêng cho từng mẫu tòa** (nhưng vẫn đảm bảo cùng mẫu = cùng giá trị ở mọi lô). Hiệu quả hơn đáng kể so với 1 hệ số scale đồng đều. Direct Calculation chỉ TÍNH, không SCALE — tách biệt rõ ràng giữa tính toán và tối ưu.
 
 3. **Hệ số K không phải mục tiêu tuyệt đối:** Mục tiêu là **maximize tổng GFA**, K chỉ là ràng buộc. Có thể 1 lô đạt 95% K_max nhưng lô khác đạt 100% → tổng vẫn tốt hơn so với mọi lô đều 97%.
 
-4. **Dải chấp nhận:** Output nên là dải `[f_min, f_max]` cho mỗi mẫu, không phải 1 con số cứng. KTS cần linh hoạt để cân chỉnh theo thiết kế thực tế.
+4. **Sensitivity Analysis:** LP solver tự động tính dải `[S_min, S_max]` cho mỗi mẫu tòa. KTS có thể cân chỉnh trong dải này mà vẫn đảm bảo feasible. Binding lots (lô đạt kMax) được highlight rõ → CĐT biết nên đàm phán ở đâu.
 
-5. **Deduction rate:** Tỷ lệ trừ (kỹ thuật, PCCC, tum...) khác nhau giữa các dự án. Phase 1 dùng tỷ lệ chung, Phase 1.5 nên cho config chi tiết.
+5. **Deduction rate:** Tỷ lệ trừ (kỹ thuật, PCCC, tum...) khác nhau giữa các dự án. Phase 1 dùng deductionRate = 0 (tối ưu tổng DT sàn XD trực tiếp), Phase 2 sẽ xử lý chi tiết.
 
 ### 7.2. Về pháp lý
 
@@ -428,7 +455,7 @@ Ví dụ: Nếu một văn bản cho phép hệ số cao hơn, văn bản đó s
 
 4. **Auto-save:** Tránh mất dữ liệu khi đóng trình duyệt. Dùng localStorage hoặc IndexedDB.
 
-5. **Performance:** Với 800 iterations × 20 lô × 10 mẫu, tính toán cần < 1 giây. JavaScript đủ nhanh cho việc này.
+5. **Performance:** LP Simplex giải trong < 1ms cho 14 lô × 7 mẫu. Monte Carlo fallback (800 iterations) cần < 1 giây. JavaScript client-side đủ nhanh cho Phase 1-2.
 
 ### 7.4. Về thực tế sử dụng
 
@@ -492,11 +519,12 @@ Ví dụ: Nếu một văn bản cho phép hệ số cao hơn, văn bản đó s
 
 ## 10. NEXT STEPS NGAY LẬP TỨC
 
-1. **Review thuật toán** với team KTS → validate logic tính K, deduction
-2. **Test với dự án thực** (Vũ Yên) → so sánh kết quả phần mềm vs Excel hiện tại
-3. **Bổ sung Excel export** → KTS có thể download kết quả và kiểm tra bằng tool quen thuộc
-4. **Thêm dynamic add/remove** lô đất và mẫu tòa từ UI
-5. **Save/Load project** để không mất config khi reload
+1. **Kết nối UI với LP Optimizer** → gọi `runLPOptimization()` từ Dashboard, hiển thị sensitivity
+2. **Bổ sung Excel export** → KTS có thể download kết quả và kiểm tra bằng tool quen thuộc
+3. **Thêm dynamic add/remove** lô đất và mẫu tòa từ UI
+4. **Save/Load project** để không mất config khi reload
+5. **Binding lot visualization** → highlight lô bottleneck trên Dashboard
+6. **Phase 2 prep** → thêm floor breakdown (tầng đế/tầng điển hình/kỹ thuật/tum)
 
 ---
 

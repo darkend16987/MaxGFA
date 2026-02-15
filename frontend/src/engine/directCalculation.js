@@ -1,69 +1,38 @@
 // ============================================================
-// DIRECT CALCULATION ENGINE
-// Phase A: Compute GFA, K, MĐXD for current configuration
+// DIRECT CALCULATION ENGINE — Phase 1 Rewrite
 // ============================================================
-// INVARIANT: Cùng mẫu tòa (building type) = cùng diện tích
-// điển hình ở MỌI lô. Scaling phải GLOBAL, không per-lot.
+// Phase 1: Biến quyết định là S_t = tổng DT sàn XD của 1 tòa.
 //
-// Two-pass approach:
-//   Pass 1: Scan all lots → find global min scale factor
-//   Pass 2: Apply global scale → compute final results
+// KHÔNG dùng global scale factor. Tính trực tiếp từ S_t đã cho.
+// Nếu S_t chưa tối ưu → gọi LP Solver (optimizer).
+// Engine này chỉ TÍNH, không SCALE.
+//
+// Công thức:
+//   k_lot = Σ(n_tj × S_t) / area_lot
+//   Ràng buộc: k_lot ≤ k_max_lot
+//   Mục tiêu: MAX Σ_all (S_t)
+//
+// Invariant: Cùng mẫu tòa = cùng S_t ở MỌI lô.
 // ============================================================
 
 /**
  * Run direct calculation on a project configuration.
+ * Simply computes K, MDXD, and GFA from current type areas.
+ * NO scaling is performed — use the optimizer to find optimal areas.
  *
  * @param {Object} project - Full project config
- * @param {Object[]} project.lots - Array of lot definitions
- * @param {Object[]} project.buildingTypes - Array of building type templates
- * @param {Object[]} project.assignments - Array of {lotId, buildings[]}
- * @param {Object} project.settings - Global settings
  * @returns {Object} { lotResults, typeAggregation, projectTotal }
  */
 export function calculateGFA(project) {
   const { lots, buildingTypes, assignments, settings } = project;
-  const { deductionRate, commercialFloors, kTargetMin } = settings;
+  const { kTargetMin = 0.90 } = settings;
 
   // Build type lookup map
   const typeMap = new Map();
   buildingTypes.forEach((bt) => typeMap.set(bt.id, bt));
 
   // ============================================================
-  // PASS 1: Find GLOBAL scale factor
-  // Cùng mẫu = cùng diện tích → phải dùng chung 1 scale factor
-  // cho toàn bộ dự án thay vì scale riêng từng lô.
-  // ============================================================
-  let globalScaleFactor = 1;
-
-  lots.forEach((lot) => {
-    const assignment = assignments.find((a) => a.lotId === lot.id);
-    if (!assignment || assignment.buildings.length === 0) return;
-
-    const buildings = assignment.buildings
-      .map((btId) => typeMap.get(btId))
-      .filter(Boolean);
-    if (buildings.length === 0) return;
-
-    const maxFloors = lot.maxFloors;
-    const totalFootprint = buildings.reduce((sum, b) => sum + b.typicalArea, 0);
-
-    // K constraint: sum(typicalArea × maxFloors) / lotArea ≤ kMax
-    const rawK = (totalFootprint * maxFloors) / lot.area;
-    if (rawK > lot.kMax) {
-      globalScaleFactor = Math.min(globalScaleFactor, lot.kMax / rawK);
-    }
-
-    // Density constraint: sum(typicalArea) / lotArea ≤ densityMax
-    const rawDensity = totalFootprint / lot.area;
-    if (rawDensity > lot.densityMax) {
-      globalScaleFactor = Math.min(globalScaleFactor, lot.densityMax / rawDensity);
-    }
-  });
-
-  // ============================================================
-  // PASS 2: Compute results using globally-consistent areas
-  // adjustedTypicalArea = typicalArea × globalScaleFactor
-  // → Cùng mẫu tòa ở bất kỳ lô nào đều cùng giá trị
+  // Compute results per lot — no scaling, direct computation
   // ============================================================
   const lotResults = lots.map((lot) => {
     const assignment = assignments.find((a) => a.lotId === lot.id);
@@ -80,63 +49,65 @@ export function calculateGFA(project) {
       return createEmptyLotResult(lot);
     }
 
-    const maxFloors = lot.maxFloors;
-    const residentialFloors = maxFloors - commercialFloors;
-    const deductionFloors = Math.ceil(maxFloors * deductionRate);
-
-    // Max GFA allowed by K constraint
-    const maxGFAByK = lot.area * lot.kMax;
-
-    // Calculate GFA per building using globally-scaled area
+    // For Phase 1: S_t is the total GFA per building
+    // We use buildingType.totalGFA if available, otherwise compute from typicalArea × totalFloors
     const buildingDetails = buildings.map((bt) => {
-      const effArea = bt.typicalArea * globalScaleFactor;
+      const totalFloors = bt.totalFloors || lot.maxFloors || 30;
+      const commercialFloors = bt.commercialFloors ?? settings.commercialFloors ?? 2;
+      const residentialFloors = totalFloors - commercialFloors;
 
-      const commercialGFA = effArea * commercialFloors;
-      const residentialGFA = effArea * residentialFloors;
-      const countedGFA = commercialGFA + residentialGFA; // Tính vào hệ số K
-      const deductionGFA = effArea * deductionFloors; // Trừ: KT, PCCC, tum...
-      const totalGFA = countedGFA + deductionGFA; // Tổng thực tế
+      // S_t: total GFA of this building (the key variable in Phase 1)
+      // If totalGFA is explicitly set, use it; otherwise compute from typical area
+      const totalGFA = bt.totalGFA || bt.typicalArea * totalFloors;
+
+      // For backward compatibility, we still compute typical area
+      const typicalArea = bt.typicalArea || (totalFloors > 0 ? totalGFA / totalFloors : 0);
+
+      // Counted GFA (for K calculation) — Phase 1 simplified: same as totalGFA
+      // Phase 2 will subtract deductions (KT, PCCC, tum...)
+      const deductionRate = settings.deductionRate || 0;
+      const countedGFA = totalGFA * (1 - deductionRate);
+      const deductionGFA = totalGFA * deductionRate;
 
       return {
         typeId: bt.id,
         type: bt,
-        typicalArea: bt.typicalArea, // Giá trị gốc từ config
-        adjustedTypicalArea: effArea, // Sau scaling (= gốc × globalScale)
-        totalFloors: maxFloors,
+        typicalArea,
+        totalFloors,
         commercialFloors,
         residentialFloors,
-        deductionFloors,
-        commercialGFA,
-        residentialGFA,
-        countedGFA,
-        deductionGFA,
-        totalGFA,
-        // Compatibility fields — same values, using effective area
+        totalGFA,         // Tổng DT sàn XD (biến Phase 1)
+        countedGFA,       // Phần tính vào hệ số K
+        deductionGFA,     // Phần trừ (KT, PCCC, tum...)
+        // Backward compatibility fields
+        adjustedTypicalArea: typicalArea,
         adjustedCountedGFA: countedGFA,
         adjustedTotalGFA: totalGFA,
         adjustedDeductionGFA: deductionGFA,
-        adjustedCommercialGFA: commercialGFA,
-        adjustedResidentialGFA: residentialGFA,
+        commercialGFA: typicalArea * commercialFloors,
+        residentialGFA: typicalArea * residentialFloors,
+        adjustedCommercialGFA: typicalArea * commercialFloors,
+        adjustedResidentialGFA: typicalArea * residentialFloors,
       };
     });
 
-    // Lot sums (using effective areas)
-    const totalFootprint = buildingDetails.reduce((s, b) => s + b.adjustedTypicalArea, 0);
-    const densityAchieved = totalFootprint / lot.area;
+    // Lot sums
+    const totalFootprint = buildingDetails.reduce((s, b) => s + b.typicalArea, 0);
+    const densityAchieved = lot.area > 0 ? totalFootprint / lot.area : 0;
     const totalCountedGFA = buildingDetails.reduce((s, b) => s + b.countedGFA, 0);
     const totalActualGFA = buildingDetails.reduce((s, b) => s + b.totalGFA, 0);
-    const kAchieved = totalCountedGFA / lot.area;
 
-    // Check if ORIGINAL (unscaled) config would violate constraints
-    const rawFootprint = buildings.reduce((s, b) => s + b.typicalArea, 0);
-    const isOverK = (rawFootprint * maxFloors) / lot.area > lot.kMax;
-    const isOverDensity = rawFootprint / lot.area > lot.densityMax;
+    // K = total counted GFA / lot area
+    const kAchieved = lot.area > 0 ? totalCountedGFA / lot.area : 0;
 
     const utilizationRate = lot.kMax > 0 ? kAchieved / lot.kMax : 0;
+    const isOverK = kAchieved > lot.kMax * 1.001; // small tolerance
+    const isOverDensity = lot.densityMax > 0 && densityAchieved > lot.densityMax * 1.001;
 
     // Status determination
     let status = "low";
-    if (utilizationRate >= kTargetMin) status = "optimal";
+    if (isOverK || isOverDensity) status = "over";
+    else if (utilizationRate >= kTargetMin) status = "optimal";
     else if (utilizationRate >= 0.80) status = "good";
 
     return {
@@ -150,20 +121,22 @@ export function calculateGFA(project) {
       densityAchieved,
       densityMax: lot.densityMax,
       utilizationRate,
-      scaleFactor: globalScaleFactor,
+      scaleFactor: 1, // No scaling in Phase 1 rewrite
       status,
-      maxFloors,
+      maxFloors: lot.maxFloors,
       isOverK,
       isOverDensity,
-      wasScaled: globalScaleFactor < 1,
+      wasScaled: false,
       // Additional metrics
       remainingKCapacity: lot.kMax - kAchieved,
-      remainingDensityCapacity: lot.densityMax - densityAchieved,
-      maxAllowableGFA: maxGFAByK,
+      remainingDensityCapacity: lot.densityMax > 0 ? lot.densityMax - densityAchieved : Infinity,
+      maxAllowableGFA: lot.area * lot.kMax,
     };
   });
 
+  // ============================================================
   // Aggregate by building type
+  // ============================================================
   const typeAggregation = {};
   buildingTypes.forEach((bt) => {
     typeAggregation[bt.id] = {
@@ -181,20 +154,22 @@ export function calculateGFA(project) {
       const agg = typeAggregation[b.typeId];
       if (agg) {
         agg.count++;
-        agg.totalCountedGFA += b.adjustedCountedGFA;
-        agg.totalActualGFA += b.adjustedTotalGFA;
+        agg.totalCountedGFA += b.countedGFA;
+        agg.totalActualGFA += b.totalGFA;
         agg.lots.push(lr.lot.id);
         agg.instances.push({
           lotId: lr.lot.id,
-          adjustedTypicalArea: b.adjustedTypicalArea,
-          adjustedCountedGFA: b.adjustedCountedGFA,
-          adjustedTotalGFA: b.adjustedTotalGFA,
+          adjustedTypicalArea: b.typicalArea,
+          adjustedCountedGFA: b.countedGFA,
+          adjustedTotalGFA: b.totalGFA,
         });
       }
     });
   });
 
+  // ============================================================
   // Project totals
+  // ============================================================
   const totalLandArea = lots.reduce((s, l) => s + l.area, 0);
   const totalCountedGFA = lotResults.reduce((s, lr) => s + lr.totalCountedGFA, 0);
   const totalActualGFA = lotResults.reduce((s, lr) => s + lr.totalActualGFA, 0);
@@ -214,8 +189,7 @@ export function calculateGFA(project) {
     totalLots: lots.length,
     avgK,
     avgUtilization,
-    globalScaleFactor,
-    // Check combined FAR constraint (QCVN 01:2021 Mục 2.6.3: ≤ 13 lần)
+    globalScaleFactor: 1, // backward compat — no scaling
     combinedFAR: avgK,
     combinedFARCompliant: avgK <= 13,
   };
@@ -270,9 +244,6 @@ export function validateProject(project) {
     }
     if (lot.kMax <= 0) {
       issues.push({ level: "error", message: `Lô ${lot.id}: Hệ số K max phải > 0` });
-    }
-    if (lot.densityMax <= 0 || lot.densityMax > 1) {
-      issues.push({ level: "warning", message: `Lô ${lot.id}: Mật độ XD max nên trong khoảng (0, 1]` });
     }
   });
 
