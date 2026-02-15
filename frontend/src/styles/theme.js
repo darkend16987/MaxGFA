@@ -38,6 +38,7 @@ export const colors = {
   statusOptimal: { bg: "#065f46", text: "#a7f3d0" },
   statusGood: { bg: "#92400e", text: "#fde68a" },
   statusLow: { bg: "#991b1b", text: "#fecaca" },
+  statusOver: { bg: "#dc2626", text: "#fef2f2" },
   statusUnassigned: { bg: "#374151", text: "#9ca3af" },
 };
 

@@ -4,6 +4,7 @@ const statusMap = {
   optimal: { bg: colors.statusOptimal.bg, text: colors.statusOptimal.text, label: "Tối ưu" },
   good: { bg: colors.statusGood.bg, text: colors.statusGood.text, label: "Khá" },
   low: { bg: colors.statusLow.bg, text: colors.statusLow.text, label: "Thấp" },
+  over: { bg: colors.statusOver.bg, text: colors.statusOver.text, label: "Vượt" },
   unassigned: { bg: colors.statusUnassigned.bg, text: colors.statusUnassigned.text, label: "Chưa gán" },
 };
 
