@@ -69,6 +69,8 @@ export function calculateGFA(project) {
       const countedGFA = totalGFA * (1 - deductionRate);
       const deductionGFA = totalGFA * deductionRate;
 
+      const deductionFloors = deductionRate > 0 ? Math.ceil(totalFloors * deductionRate) : 0;
+
       return {
         typeId: bt.id,
         type: bt,
@@ -76,6 +78,7 @@ export function calculateGFA(project) {
         totalFloors,
         commercialFloors,
         residentialFloors,
+        deductionFloors,
         totalGFA,         // Tổng DT sàn XD (biến Phase 1)
         countedGFA,       // Phần tính vào hệ số K
         deductionGFA,     // Phần trừ (KT, PCCC, tum...)

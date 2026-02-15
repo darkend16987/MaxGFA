@@ -517,14 +517,234 @@ Ví dụ: Nếu một văn bản cho phép hệ số cao hơn, văn bản đó s
 
 ---
 
-## 10. NEXT STEPS NGAY LẬP TỨC
+## 10. CẤU TRÚC MÃ NGUỒN & HƯỚNG DẪN MAINTAIN
 
-1. **Kết nối UI với LP Optimizer** → gọi `runLPOptimization()` từ Dashboard, hiển thị sensitivity
-2. **Bổ sung Excel export** → KTS có thể download kết quả và kiểm tra bằng tool quen thuộc
-3. **Thêm dynamic add/remove** lô đất và mẫu tòa từ UI
-4. **Save/Load project** để không mất config khi reload
-5. **Binding lot visualization** → highlight lô bottleneck trên Dashboard
-6. **Phase 2 prep** → thêm floor breakdown (tầng đế/tầng điển hình/kỹ thuật/tum)
+### 10.1. Cấu trúc thư mục
+
+```
+frontend/src/
+├── App.jsx                     # Main app: routing, state, optimize/recalc handlers
+├── main.jsx                    # React entry point
+├── engine/                     # Core computation (không phụ thuộc UI)
+│   ├── index.js                # Re-exports all engine functions
+│   ├── directCalculation.js    # calculateGFA() — tính K, MĐXD, GFA từ config
+│   ├── lpSolver.js             # solveLP(), solveGFAOptimization() — Simplex LP
+│   ├── optimizer.js            # runLPOptimization(), runCombinedOptimization()
+│   ├── reverseCalculation.js   # reverseCalcForLot() — tính ngược từ K → DT
+│   └── explainability.js       # explainLotResult() — giải thích kết quả
+├── components/                 # React UI components
+│   ├── DashboardTab.jsx        # Tab chính: KPI, lot cards, type summary
+│   ├── LotCard.jsx             # Card hiển thị 1 lô đất
+│   ├── StatusBadge.jsx         # Badge trạng thái: Tối ưu/Khá/Thấp/Vượt/Chưa gán
+│   ├── MiniBar.jsx             # Thanh tiến trình mini (K, MĐXD, utilization)
+│   ├── ConfigTab.jsx           # Tab cấu hình lô đất
+│   ├── TypesTab.jsx            # Tab cấu hình mẫu tòa
+│   ├── SpreadsheetTab.jsx      # Tab bảng tính (spreadsheet view)
+│   ├── LegalTab.jsx            # Tab quy định pháp lý
+│   └── ConfigInput.jsx         # Input component dùng chung
+├── data/
+│   ├── defaultProject.js       # Dữ liệu mẫu Đảo Vũ Yên (14 lô, 7 mẫu, 32 tòa)
+│   ├── buildingShapes.js       # Định nghĩa shape: I, L, H, U, Z, SQ + icon/color
+│   └── legalRules.js           # Quy định pháp lý (QCVN 01:2021, CV 3633...)
+├── utils/
+│   ├── excelExport.js          # Export .xlsx (SheetJS)
+│   ├── storage.js              # localStorage save/load/export/import JSON
+│   └── format.js               # fmtNum() — format số với locale vi-VN
+└── styles/
+    └── theme.js                # Design tokens: colors, fonts, global CSS
+```
+
+### 10.2. Luồng dữ liệu chính
+
+```
+                    ┌──────────────────────────────────┐
+                    │         App.jsx (State)           │
+                    │  project, result, isOptimizing    │
+                    └──────┬──────────────┬────────────┘
+                           │              │
+              ┌────────────▼──┐    ┌──────▼──────────┐
+              │ calculateGFA()│    │ runCombined      │
+              │ (on load,     │    │ Optimization()   │
+              │  on recalc)   │    │ (on click        │
+              │               │    │  "Tối ưu hóa")   │
+              └────────┬──────┘    └──────┬───────────┘
+                       │                  │
+                       ▼                  ▼
+              ┌──────────────┐    ┌──────────────────┐
+              │   result     │    │ LP Solver →       │
+              │ {lotResults, │    │ MC fallback →     │
+              │  typeAgg,    │    │ Best VALID result │
+              │  projTotal}  │    └──────┬───────────┘
+              └──────┬───────┘           │
+                     │                   │
+                     ▼                   ▼
+              ┌──────────────────────────────────────┐
+              │ UI Components (Dashboard, LotCard...)  │
+              │ setResult(r) → re-render               │
+              └────────────────────────────────────────┘
+```
+
+### 10.3. Data Model
+
+**Project Object** (state gốc, lưu vào localStorage):
+```javascript
+{
+  name: "Tên dự án",
+  lots: [
+    { id: "CC01", name: "B6-CC-01", area: 24473.69,
+      kMax: 5.30, densityMax: 0.20, maxFloors: 30 }
+  ],
+  buildingTypes: [
+    { id: "L_short", shape: "L", label: "L ngắn",
+      typicalArea: 1472.67,   // DT sàn 1 tầng (m²)
+      totalFloors: 30,        // Tổng số tầng
+      commercialFloors: 2,    // Số tầng TMDV
+      totalGFA: 44180.1 }     // (optional) tổng DT sàn XD = typicalArea × totalFloors
+  ],
+  assignments: [
+    { lotId: "CC01", buildings: ["L_short", "L_short", "I1"] }
+  ],
+  settings: {
+    deductionRate: 0,         // Tỷ lệ trừ (Phase 1: 0)
+    commercialFloors: 2,      // Default nếu type không specify
+    kTargetMin: 0.90,         // Ngưỡng % kMax cho status "optimal"
+    optimizationIterations: 800,
+    perturbationRange: 0.08
+  }
+}
+```
+
+**Calculation Result** (output từ `calculateGFA()`):
+```javascript
+{
+  lotResults: [{
+    lot: { id, area, kMax, ... },
+    buildings: [{ typeId, typicalArea, totalGFA, countedGFA, ... }],
+    buildingCount, totalCountedGFA, totalActualGFA,
+    kAchieved, kMax, utilizationRate,
+    densityAchieved, densityMax,
+    status: "optimal" | "good" | "low" | "over" | "unassigned",
+    isOverK, isOverDensity
+  }],
+  typeAggregation: { "L_short": { count, totalCountedGFA, lots, instances } },
+  projectTotal: { totalCountedGFA, totalLandArea, totalBuildings, avgK, avgUtilization }
+}
+```
+
+**LP Problem** (input cho `solveGFAOptimization()`):
+```javascript
+{
+  lots: [{ id, area, kMax }],
+  types: [{ id, totalFloors }],
+  assignments: [{ lotId, buildings: ["typeId", ...] }],
+  bounds: { min: { typeId: value }, max: { typeId: value } }
+}
+```
+
+### 10.4. Trạng thái lô đất (Status)
+
+| Status | Điều kiện | Badge | Màu icon |
+|--------|-----------|-------|----------|
+| `"over"` | K > kMax hoặc MĐXD > max | Đỏ "VƯỢT" | `#dc2626` |
+| `"optimal"` | utilization ≥ 90% kMax | Xanh "TỐI ƯU" | `#065f46` |
+| `"good"` | 80% ≤ utilization < 90% | Vàng "KHÁ" | `#92400e` |
+| `"low"` | utilization < 80% | Đỏ nhạt "THẤP" | `#991b1b` |
+| `"unassigned"` | Lô không có tòa nào | Xám "CHƯA GÁN" | `#374151` |
+
+### 10.5. Quy trình tối ưu (runCombinedOptimization)
+
+```
+1. runLPOptimization(project, ±50% bounds)
+   → Simplex exact solution
+   → If infeasible/failed → return baseline
+
+2. runIterativeOptimization(LP result, 400 iter)
+   → MC refinement từ LP starting point
+
+3. runIterativeOptimization(original, 400 iter)
+   → MC exploration từ baseline
+
+4. Filter: chỉ giữ candidates VALID (no "over" lots)
+5. Chọn: highest totalCountedGFA trong valid candidates
+6. Nếu không có valid → fallback highest GFA
+```
+
+**Lưu ý quan trọng:**
+- Khi baseline vi phạm constraints (status="over"), MC khởi tạo `bestTotalGFA = 0` thay vì baselineGFA, để bất kỳ valid trial nào cũng được chấp nhận.
+- Khi so sánh candidates, ưu tiên valid > invalid, không chỉ dựa vào GFA cao nhất.
+- Auto-optimize chạy trên page load nếu phát hiện bất kỳ lô nào status="over".
+
+### 10.6. Các hàm engine chính
+
+| Hàm | File | Vai trò |
+|-----|------|---------|
+| `calculateGFA(project)` | directCalculation.js | Tính K, MĐXD, GFA — chỉ TÍNH, không scale |
+| `validateProject(project)` | directCalculation.js | Kiểm tra lỗi logic (thiếu lô, thiếu type...) |
+| `solveLP(c, A, b, lb, ub)` | lpSolver.js | Giải LP tổng quát bằng Simplex |
+| `solveGFAOptimization(problem)` | lpSolver.js | Wrap LP cho bài toán GFA cụ thể |
+| `computeSensitivity(lpResult, problem)` | lpSolver.js | Tính dải [min, max] khả thi cho mỗi type |
+| `runLPOptimization(project, options)` | optimizer.js | Tối ưu LP: project → optimized types |
+| `runIterativeOptimization(project, options)` | optimizer.js | MC perturbation fallback |
+| `runCombinedOptimization(project, options)` | optimizer.js | LP + MC → best valid result |
+| `reverseCalcForLot(project, lotId, targetK)` | reverseCalculation.js | Tính ngược: cho K → tìm DT cần |
+| `findMaxFeasibleGFA(project, lotId)` | reverseCalculation.js | Binary search max GFA cho 1 lô |
+| `explainLotResult(project, lotResult)` | explainability.js | Giải thích công thức cho KTS |
+
+---
+
+## 11. KNOWN ISSUES & TODO
+
+### 11.1. Issues đã biết (cần fix)
+
+| # | Mức | Vấn đề | File |
+|---|-----|--------|------|
+| 1 | Medium | ConfigInput chấp nhận giá trị âm (area, kMax) | ConfigInput.jsx |
+| 2 | Medium | SpreadsheetTab parse assignment chỉ tách theo dấu phẩy, không tách khoảng trắng | SpreadsheetTab.jsx |
+| 3 | Medium | Auto-save reset interval mỗi khi project thay đổi | App.jsx |
+| 4 | Low | TypesTab: đổi ID mẫu tòa không cập nhật references trong assignments | TypesTab.jsx |
+| 5 | Low | localStorage đầy → save thất bại nhưng user không biết | storage.js |
+| 6 | Low | Import JSON dùng `alert()` thay vì toast | App.jsx |
+
+### 11.2. Cải tiến kế hoạch
+
+| # | Feature | Mô tả | Priority |
+|---|---------|-------|----------|
+| 1 | Sensitivity UI | Hiển thị dải [min, max] cho mỗi mẫu tòa trên Dashboard | High |
+| 2 | Binding lot highlight | Tô đậm lô bottleneck (đạt kMax) | High |
+| 3 | Excel export (đã có) | Hoàn thiện export với sensitivity data | Medium |
+| 4 | Dynamic add/remove lots | Thêm/xóa lô đất từ UI | Medium |
+| 5 | Dynamic add/remove types | Thêm/xóa mẫu tòa từ UI | Medium |
+| 6 | Scenario comparison | Lưu và so sánh N phương án | Medium |
+| 7 | Floor breakdown (Phase 2) | Chia tổng GFA thành tầng đế/điển hình/KT/tum | Low |
+| 8 | TypeScript migration | Chuyển sang TypeScript cho type safety | Low |
+
+---
+
+## 12. CHANGELOG
+
+### v2.1 (15/02/2026) — Bug Fixes
+- **Fix:** StatusBadge thiếu status "over" → hiển thị "Chưa gán" thay vì "Vượt"
+- **Fix:** runCombinedOptimization chọn kết quả GFA cao nhất bất kể valid → ưu tiên valid candidates
+- **Fix:** MC optimizer không chấp nhận valid trial khi baseline vi phạm → bestTotalGFA = 0 khi baseline invalid
+- **Fix:** MC perturbation không cập nhật bt.totalGFA khi đã set → thêm totalGFA perturbation
+- **Fix:** MiniBar không hiển thị trạng thái "vượt" (K > kMax) → thêm logic isOver
+- **Fix:** excelExport thiếu status "Vượt" và field deductionFloors
+- **Fix:** LP solver thiếu input validation → thêm dimension checks
+- **Add:** Auto-optimize on page load khi phát hiện lô vi phạm constraints
+- **Add:** LotCard icon background đỏ cho status "over"
+
+### v2.0 (15/02/2026) — LP Solver + Phase 1 Rewrite
+- **Replace:** Global Scale Factor → LP Simplex Method (nghiệm chính xác)
+- **Rewrite:** directCalculation.js — chỉ TÍNH, không SCALE
+- **Rewrite:** optimizer.js — LP primary + MC fallback
+- **Add:** lpSolver.js — Two-Phase Simplex + sensitivity analysis
+- **Update:** defaultProject.js — 14 lô, 7 mẫu tòa từ dữ liệu Excel thực
+- **Validate:** Kết quả LP khớp với Excel (chênh lệch ~0.05%)
+
+### v1.x — Global Scaling (deprecated)
+- Direct Calculation dùng global scale factor (1 hệ số cho tất cả mẫu)
+- Iterative Optimization dùng Monte Carlo 800 iterations
+- Bug: cùng mẫu tòa ở lô khác nhau có thể có DT khác nhau (per-lot scaling)
 
 ---
 

@@ -83,7 +83,10 @@ export function reverseCalculate({ project, result, lotId, target, lockedTypes =
   const lockedTypesInLot = typeIdsInLot.filter((id) => lockedTypes.includes(id));
 
   if (changeableTypes.length === 0) {
-    return { feasible: false, error: "Tất cả mẫu tòa trong lô đều bị khóa" };
+    const reason = typeIdsInLot.length === 0
+      ? "Lô không có tòa nhà để thay đổi"
+      : "Tất cả mẫu tòa trong lô đều bị khóa";
+    return { feasible: false, error: reason };
   }
 
   // Compute GFA contribution from locked vs changeable types
