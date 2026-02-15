@@ -143,20 +143,27 @@ export function runIterativeOptimization(project, options = {}) {
   // Baseline
   const baselineResult = calculateGFA(project);
   const baselineGFA = baselineResult.projectTotal.totalCountedGFA;
+  const baselineValid = baselineResult.lotResults.every((lr) => lr.status !== "over");
 
   let bestResult = baselineResult;
   let bestTypes = buildingTypes;
-  let bestTotalGFA = baselineGFA;
+  // If baseline violates constraints, set bestTotalGFA to 0 so any valid trial is accepted
+  let bestTotalGFA = baselineValid ? baselineGFA : 0;
+  let bestIsValid = baselineValid;
 
   let validCount = 0;
   let improvedCount = 0;
 
   for (let i = 0; i < iterations; i++) {
-    // Generate trial: perturb each building type's typical area
-    const trialTypes = buildingTypes.map((bt) => ({
-      ...bt,
-      typicalArea: bt.typicalArea * (1 - perturbationRange + Math.random() * perturbationRange * 2),
-    }));
+    // Generate trial: perturb each building type's typical area (and totalGFA if set)
+    const trialTypes = buildingTypes.map((bt) => {
+      const factor = 1 - perturbationRange + Math.random() * perturbationRange * 2;
+      return {
+        ...bt,
+        typicalArea: bt.typicalArea * factor,
+        ...(bt.totalGFA ? { totalGFA: bt.totalGFA * factor } : {}),
+      };
+    });
 
     const trialProject = { ...project, buildingTypes: trialTypes };
     const trialResult = calculateGFA(trialProject);
@@ -168,10 +175,13 @@ export function runIterativeOptimization(project, options = {}) {
 
     if (allValid) {
       validCount++;
-      if (trialResult.projectTotal.totalCountedGFA > bestTotalGFA) {
-        bestTotalGFA = trialResult.projectTotal.totalCountedGFA;
+      const trialGFA = trialResult.projectTotal.totalCountedGFA;
+      // Accept if: (a) better GFA among valid solutions, or (b) first valid when baseline was invalid
+      if (trialGFA > bestTotalGFA || !bestIsValid) {
+        bestTotalGFA = trialGFA;
         bestResult = trialResult;
         bestTypes = trialTypes;
+        bestIsValid = true;
         improvedCount++;
       }
     }
@@ -237,14 +247,24 @@ export function runCombinedOptimization(project, options = {}) {
     iterations: Math.floor(iterations / 2),
   });
 
-  // Return the best across all methods
+  // Return the best VALID result across all methods
+  // A result is "valid" if no lot violates constraints (status !== "over")
   const candidates = [
     { label: "lp_exact", ...lpResult },
     { label: "lp+mc", ...mcFromLP },
     { label: "mc_original", ...mcOriginal },
   ];
 
-  const best = candidates.reduce((a, b) =>
+  // Check validity: all lots must satisfy constraints
+  const isValid = (candidate) =>
+    candidate.result.lotResults.every((lr) => lr.status !== "over");
+
+  const validCandidates = candidates.filter(isValid);
+
+  // Prefer valid results; only fall back to invalid if none are valid
+  const pool = validCandidates.length > 0 ? validCandidates : candidates;
+
+  const best = pool.reduce((a, b) =>
     a.result.projectTotal.totalCountedGFA >= b.result.projectTotal.totalCountedGFA ? a : b
   );
 

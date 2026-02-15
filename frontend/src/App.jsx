@@ -50,13 +50,31 @@ export default function App() {
 
   const fileInputRef = useRef(null);
 
-  // Initial calculation
+  // Initial calculation + auto-optimize if constraints violated
   useEffect(() => {
     const r = calculateGFA(project);
     setResult(r);
     const issues = validateProject(project);
     setValidationIssues(issues);
-  }, []);
+
+    // Auto-optimize if any lot violates K constraint
+    const hasViolation = r.lotResults.some((lr) => lr.status === "over");
+    if (hasViolation) {
+      setIsOptimizing(true);
+      setTimeout(() => {
+        const optimized = runCombinedOptimization(project);
+        setResult(optimized.result);
+        setProject((p) => ({ ...p, buildingTypes: optimized.types }));
+        setIsOptimizing(false);
+        setOptimizationLog([{
+          time: new Date().toLocaleTimeString(),
+          action: `Tối ưu tự động (${optimized.stats.method}, ${optimized.stats.improvement >= 0 ? "+" : ""}${optimized.stats.improvement.toFixed(2)}%)`,
+          totalGFA: optimized.result.projectTotal.totalCountedGFA,
+        }]);
+        saveProject({ ...project, buildingTypes: optimized.types });
+      }, 100);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-save every 30 seconds
   useEffect(() => {

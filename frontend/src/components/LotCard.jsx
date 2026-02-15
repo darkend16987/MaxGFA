@@ -31,9 +31,11 @@ export default function LotCard({ lotResult, expanded, onToggle }) {
               background:
                 lr.status === "optimal"
                   ? colors.greenDark
-                  : lr.status === "good"
-                    ? colors.statusGood.bg
-                    : colors.statusUnassigned.bg,
+                  : lr.status === "over"
+                    ? colors.statusOver.bg
+                    : lr.status === "good"
+                      ? colors.statusGood.bg
+                      : colors.statusUnassigned.bg,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
