@@ -1,26 +1,135 @@
 // ============================================================
-// OPTIMIZATION ENGINE
-// Phase B: Iterative optimization to maximize total GFA
+// OPTIMIZATION ENGINE — Phase 1 Rewrite
 // ============================================================
-// Core insight: Building types share typical area across lots.
-// Changing f_t for type T affects ALL lots containing T.
-// This coupling means we cannot optimize lots independently.
+// Core insight: Bài toán Phase 1 là LP thuần túy.
 //
-// Strategy: Monte Carlo perturbation with constraint checking.
-// Future: Genetic Algorithm, Linear Programming relaxation.
+//   MAX  Σ (N_t × S_t)     — tổng diện tích sàn XD
+//   s.t. Σ(n_tj × S_t) / area_j ≤ k_max_j   — per-lot K
+//        S_t_min ≤ S_t ≤ S_t_max              — bounds
+//
+// LP cho nghiệm CHÍNH XÁC, không cần Monte Carlo random.
+// Monte Carlo được giữ lại như fallback cho bài toán phức tạp.
 // ============================================================
 
 import { calculateGFA } from "./directCalculation";
+import { solveGFAOptimization, computeSensitivity } from "./lpSolver";
+
+/**
+ * Run LP-based optimization (recommended for Phase 1).
+ * Exact solution, no randomness.
+ *
+ * @param {Object} project - Full project config
+ * @param {Object} options - { boundsRange: 0.5 (±50% of current) }
+ * @returns {Object} { result, types, stats, sensitivity }
+ */
+export function runLPOptimization(project, options = {}) {
+  const { buildingTypes, lots, assignments, settings } = project;
+  const { boundsRange = 0.5 } = options;
+
+  // Baseline
+  const baselineResult = calculateGFA(project);
+  const baselineGFA = baselineResult.projectTotal.totalCountedGFA;
+
+  // Build LP problem
+  const types = buildingTypes.map((bt) => ({
+    id: bt.id,
+    totalFloors: bt.totalFloors || settings.maxFloors || 30,
+  }));
+
+  // Compute current S_t for each type (totalGFA per building)
+  const currentS = {};
+  buildingTypes.forEach((bt) => {
+    const floors = bt.totalFloors || lots[0]?.maxFloors || 30;
+    currentS[bt.id] = bt.totalGFA || bt.typicalArea * floors;
+  });
+
+  // Set bounds: allow ±boundsRange around current S_t
+  const boundsMin = {};
+  const boundsMax = {};
+  buildingTypes.forEach((bt) => {
+    const S = currentS[bt.id];
+    boundsMin[bt.id] = S * (1 - boundsRange);
+    boundsMax[bt.id] = S * (1 + boundsRange);
+  });
+
+  // Override with user-specified bounds if any
+  if (options.bounds) {
+    if (options.bounds.min) Object.assign(boundsMin, options.bounds.min);
+    if (options.bounds.max) Object.assign(boundsMax, options.bounds.max);
+  }
+
+  const problem = {
+    lots: lots.map((l) => ({ id: l.id, area: l.area, kMax: l.kMax })),
+    types,
+    assignments,
+    bounds: { min: boundsMin, max: boundsMax },
+  };
+
+  // Solve LP
+  const lpResult = solveGFAOptimization(problem);
+
+  if (lpResult.status !== 'optimal') {
+    return {
+      result: baselineResult,
+      types: buildingTypes,
+      stats: {
+        method: "lp_failed",
+        reason: lpResult.reason || lpResult.status,
+        baselineGFA,
+        bestGFA: baselineGFA,
+        improvement: 0,
+      },
+      sensitivity: null,
+    };
+  }
+
+  // Build optimized building types with new S_t values
+  const optimizedTypes = buildingTypes.map((bt) => {
+    const optimalS = lpResult.solution[bt.id];
+    const floors = bt.totalFloors || lots[0]?.maxFloors || 30;
+    const newTypicalArea = optimalS / floors;
+
+    return {
+      ...bt,
+      typicalArea: newTypicalArea,
+      totalGFA: optimalS,
+    };
+  });
+
+  // Run calculation with optimized types
+  const optimizedProject = { ...project, buildingTypes: optimizedTypes };
+  const result = calculateGFA(optimizedProject);
+
+  // Sensitivity analysis
+  const sensitivity = computeSensitivity(lpResult, problem);
+
+  const improvement = baselineGFA > 0
+    ? ((result.projectTotal.totalCountedGFA - baselineGFA) / baselineGFA) * 100
+    : 0;
+
+  return {
+    result,
+    types: optimizedTypes,
+    stats: {
+      method: "lp_exact",
+      baselineGFA,
+      bestGFA: result.projectTotal.totalCountedGFA,
+      improvement,
+      bindingLots: lpResult.bindingLots,
+      iterations: 1, // LP is single-pass
+    },
+    sensitivity,
+    lpResult, // raw LP output for debugging
+  };
+}
 
 /**
  * Run iterative optimization (Monte Carlo with perturbation).
+ * Kept as fallback for complex/non-linear constraints.
  *
  * @param {Object} project - Full project config
- * @param {Object} options - Optimization options
- * @param {number} options.iterations - Number of iterations (default 800)
- * @param {number} options.perturbationRange - ±range for area perturbation (default 0.08 = 8%)
- * @param {Function} options.onProgress - Progress callback (iteration, bestGFA)
- * @returns {Object} { result, types, iterations, improvement }
+ * @param {Object} options
+ * @returns {Object} { result, types, stats }
  */
 export function runIterativeOptimization(project, options = {}) {
   const {
@@ -31,7 +140,7 @@ export function runIterativeOptimization(project, options = {}) {
 
   const { buildingTypes } = project;
 
-  // Baseline: calculate with current config
+  // Baseline
   const baselineResult = calculateGFA(project);
   const baselineGFA = baselineResult.projectTotal.totalCountedGFA;
 
@@ -39,7 +148,6 @@ export function runIterativeOptimization(project, options = {}) {
   let bestTypes = buildingTypes;
   let bestTotalGFA = baselineGFA;
 
-  // Track statistics
   let validCount = 0;
   let improvedCount = 0;
 
@@ -50,22 +158,15 @@ export function runIterativeOptimization(project, options = {}) {
       typicalArea: bt.typicalArea * (1 - perturbationRange + Math.random() * perturbationRange * 2),
     }));
 
-    // Run calculation with trial types
     const trialProject = { ...project, buildingTypes: trialTypes };
     const trialResult = calculateGFA(trialProject);
 
-    // Check ALL constraints satisfied (small tolerance for floating point)
-    const tolerance = 1.001;
+    // Check ALL constraints satisfied
     const allValid = trialResult.lotResults.every(
-      (lr) =>
-        lr.kAchieved <= lr.kMax * tolerance &&
-        lr.densityAchieved <= lr.densityMax * tolerance
+      (lr) => lr.status !== "over"
     );
 
-    // Also check combined FAR ≤ 13
-    const combinedFARValid = trialResult.projectTotal.combinedFAR <= 13 * tolerance;
-
-    if (allValid && combinedFARValid) {
+    if (allValid) {
       validCount++;
       if (trialResult.projectTotal.totalCountedGFA > bestTotalGFA) {
         bestTotalGFA = trialResult.projectTotal.totalCountedGFA;
@@ -75,7 +176,6 @@ export function runIterativeOptimization(project, options = {}) {
       }
     }
 
-    // Progress callback every 50 iterations
     if (onProgress && (i + 1) % 50 === 0) {
       onProgress({
         iteration: i + 1,
@@ -96,136 +196,52 @@ export function runIterativeOptimization(project, options = {}) {
     result: bestResult,
     types: bestTypes,
     stats: {
+      method: "monte_carlo",
       iterations,
       validCount,
       improvedCount,
       baselineGFA,
       bestGFA: bestTotalGFA,
-      improvement, // percentage
+      improvement,
     },
   };
 }
 
 /**
- * Run a smarter optimization that tries to push each type to
- * maximize utilization across all lots it appears in.
- *
- * Strategy: For each building type, find the tightest constraint
- * across all lots it's assigned to, then set typical area to
- * maximize within that constraint.
- *
- * @param {Object} project
- * @returns {Object} { result, types, stats }
- */
-export function runSmartOptimization(project) {
-  const { lots, buildingTypes, assignments, settings } = project;
-  const { commercialFloors, deductionRate } = settings;
-
-  // Build a map: typeId -> [lotIds where it's used]
-  const typeToLots = new Map();
-  assignments.forEach((a) => {
-    a.buildings.forEach((btId) => {
-      if (!typeToLots.has(btId)) typeToLots.set(btId, []);
-      typeToLots.get(btId).push(a.lotId);
-    });
-  });
-
-  // For each type, compute the maximum allowable typical area
-  // considering ALL lots it appears in
-  const optimizedTypes = buildingTypes.map((bt) => {
-    const usedInLots = typeToLots.get(bt.id) || [];
-    if (usedInLots.length === 0) return bt;
-
-    let minAllowableArea = Infinity;
-
-    usedInLots.forEach((lotId) => {
-      const lot = lots.find((l) => l.id === lotId);
-      if (!lot) return;
-
-      const assignment = assignments.find((a) => a.lotId === lotId);
-      if (!assignment) return;
-
-      const buildingsInLot = assignment.buildings;
-      const numThisType = buildingsInLot.filter((id) => id === bt.id).length;
-      const otherTypesArea = buildingsInLot
-        .filter((id) => id !== bt.id)
-        .reduce((sum, id) => {
-          const other = buildingTypes.find((t) => t.id === id);
-          return sum + (other ? other.typicalArea : 0);
-        }, 0);
-
-      const maxFloors = lot.maxFloors;
-      const countedFloors = maxFloors - Math.ceil(maxFloors * deductionRate);
-
-      // K constraint: numThisType * f_t * countedFloors + otherGFA ≤ lot.area * lot.kMax
-      const otherCountedGFA = otherTypesArea * countedFloors;
-      const remainingK = lot.area * lot.kMax - otherCountedGFA;
-      const maxByK = remainingK / (numThisType * countedFloors);
-
-      // Density constraint: numThisType * f_t + otherFootprint ≤ lot.area * lot.densityMax
-      const remainingDensity = lot.area * lot.densityMax - otherTypesArea;
-      const maxByDensity = remainingDensity / numThisType;
-
-      const maxArea = Math.min(maxByK, maxByDensity);
-      if (maxArea < minAllowableArea) {
-        minAllowableArea = maxArea;
-      }
-    });
-
-    // Use 98% of max to leave room for adjustment
-    const targetArea = Math.min(minAllowableArea * 0.98, bt.typicalArea * 1.15);
-    // Don't go below 85% of original
-    const finalArea = Math.max(targetArea, bt.typicalArea * 0.85);
-
-    return { ...bt, typicalArea: finalArea > 0 ? finalArea : bt.typicalArea };
-  });
-
-  const result = calculateGFA({ ...project, buildingTypes: optimizedTypes });
-
-  return {
-    result,
-    types: optimizedTypes,
-    stats: {
-      method: "smart",
-      iterations: 1,
-      baselineGFA: calculateGFA(project).projectTotal.totalCountedGFA,
-      bestGFA: result.projectTotal.totalCountedGFA,
-    },
-  };
-}
-
-/**
- * Run combined optimization: smart initialization + Monte Carlo refinement.
- * This is the recommended approach.
+ * Run combined optimization: LP first, then Monte Carlo refinement.
+ * LP gives exact optimum for linear constraints.
+ * MC can explore non-linear edge cases.
  *
  * @param {Object} project
  * @param {Object} options
- * @returns {Object} Best result
+ * @returns {Object} Best result across all methods
  */
 export function runCombinedOptimization(project, options = {}) {
   const { onProgress } = options;
   const iterations = project.settings?.optimizationIterations || 800;
 
-  // Step 1: Smart optimization as starting point
-  const smartResult = runSmartOptimization(project);
+  // Step 1: LP optimization (exact solution)
+  const lpResult = runLPOptimization(project, {
+    boundsRange: options.boundsRange || 0.5,
+  });
 
-  // Step 2: Monte Carlo refinement from smart starting point
-  const refinedProject = { ...project, buildingTypes: smartResult.types };
-  const mcResult = runIterativeOptimization(refinedProject, {
-    iterations,
+  // Step 2: Monte Carlo from LP starting point (refinement)
+  const lpProject = { ...project, buildingTypes: lpResult.types };
+  const mcFromLP = runIterativeOptimization(lpProject, {
+    iterations: Math.floor(iterations / 2),
     onProgress,
   });
 
-  // Step 3: Also run Monte Carlo from original starting point
-  const originalMcResult = runIterativeOptimization(project, {
+  // Step 3: Monte Carlo from original (exploration)
+  const mcOriginal = runIterativeOptimization(project, {
     iterations: Math.floor(iterations / 2),
   });
 
-  // Return the best of all approaches
+  // Return the best across all methods
   const candidates = [
-    { label: "smart", ...smartResult },
-    { label: "smart+mc", ...mcResult },
-    { label: "mc_original", ...originalMcResult },
+    { label: "lp_exact", ...lpResult },
+    { label: "lp+mc", ...mcFromLP },
+    { label: "mc_original", ...mcOriginal },
   ];
 
   const best = candidates.reduce((a, b) =>
@@ -242,7 +258,7 @@ export function runCombinedOptimization(project, options = {}) {
     types: best.types,
     stats: {
       method: best.label,
-      totalIterations: iterations + Math.floor(iterations / 2) + 1,
+      totalIterations: iterations + 1,
       baselineGFA,
       bestGFA: best.result.projectTotal.totalCountedGFA,
       improvement,
@@ -250,6 +266,13 @@ export function runCombinedOptimization(project, options = {}) {
         label: c.label,
         gfa: c.result.projectTotal.totalCountedGFA,
       })),
+      bindingLots: lpResult.stats.bindingLots || [],
     },
+    sensitivity: lpResult.sensitivity,
   };
+}
+
+// Keep backward compat: runSmartOptimization → delegates to LP
+export function runSmartOptimization(project) {
+  return runLPOptimization(project);
 }
