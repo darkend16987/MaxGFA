@@ -32,6 +32,11 @@ export function solveLP(c, A, b, lb = null, ub = null) {
   const n = c.length; // number of original variables
   const m = A.length; // number of constraints
 
+  // Input validation
+  if (n === 0) return { status: 'optimal', x: [], objectiveValue: 0, bindingConstraints: [] };
+  if (m === 0) return { status: 'unbounded', x: null, objectiveValue: Infinity, reason: 'No constraints' };
+  if (b.length !== m) return { status: 'infeasible', x: null, objectiveValue: -Infinity, reason: 'Dimension mismatch: b vs A' };
+
   // Default bounds
   if (!lb) lb = new Array(n).fill(0);
   if (!ub) ub = new Array(n).fill(Infinity);

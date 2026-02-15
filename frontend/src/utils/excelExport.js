@@ -100,7 +100,7 @@ function addLotDetailsSheet(wb, result) {
     lr.maxFloors,
     Math.round(lr.totalCountedGFA * 100) / 100,
     Math.round(lr.totalActualGFA * 100) / 100,
-    lr.status === "optimal" ? "Tối ưu" : lr.status === "good" ? "Khá" : lr.status === "low" ? "Thấp" : "Chưa gán",
+    lr.status === "optimal" ? "Tối ưu" : lr.status === "good" ? "Khá" : lr.status === "over" ? "Vượt" : lr.status === "low" ? "Thấp" : "Chưa gán",
   ]);
 
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
