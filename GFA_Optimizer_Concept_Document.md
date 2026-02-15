@@ -1,7 +1,7 @@
 # GFA OPTIMIZER — Tối ưu Tổng Diện Tích Sàn Xây Dựng
 
-**Phiên bản:** 1.0 Draft  
-**Ngày:** 13/02/2026  
+**Phiên bản:** 1.1 (Global Scaling Fix)
+**Ngày:** 15/02/2026
 **Dự án:** Công cụ hỗ trợ tối ưu hóa diện tích sàn xây dựng cho các dự án bất động sản cao tầng  
 **Đối tượng sử dụng:** Kiến trúc sư (KTS), Tư vấn thiết kế, Chủ đầu tư, Bộ phận phát triển dự án
 
@@ -125,29 +125,59 @@ Trong đó:
 
 ### 3.2. Phase A — Tính toán trực tiếp (Direct Calculation)
 
-Đây là engine tính toán cơ bản, chạy mỗi khi user thay đổi config:
+Đây là engine tính toán cơ bản, chạy mỗi khi user thay đổi config.
+
+**INVARIANT:** Cùng mẫu tòa (building type) = cùng diện tích điển hình ở MỌI lô. Scaling phải GLOBAL, không per-lot.
+
+**Thuật toán Two-Pass (Global Scaling):**
 
 ```
 INPUT: lots[], buildingTypes[], assignments[], deductionRate, commercialFloors
 
+──────────────────────────────────────────────────
+PASS 1: Tìm GLOBAL scale factor (lô chặt nhất quyết định)
+──────────────────────────────────────────────────
+globalScaleFactor = 1.0
+
 FOR mỗi lô j:
   1. Lấy danh sách tòa từ assignments
-  2. Tính totalFootprint = Σ(typicalArea) các tòa trong lô
-  3. Tính densityAchieved = totalFootprint / lot.area
-  4. FOR mỗi tòa trong lô:
-     - commercialGFA = typicalArea × commercialFloors
-     - residentialGFA = typicalArea × (maxFloors - commercialFloors)
-     - countedGFA = commercialGFA + residentialGFA  (tính vào hệ số K)
-     - deductionGFA = typicalArea × deductionFloors  (trừ: KT, PCCC, tum...)
-     - totalGFA = countedGFA + deductionGFA  (tổng thực tế)
-  5. kAchieved = Σ(countedGFA) / lot.area
-  6. NẾU kAchieved > kMax HOẶC density > densityMax:
-     - scaleFactor = min(kMax*area/totalCounted, densityMax*area/footprint)
-     - Scale down tất cả diện tích theo scaleFactor
-  7. Tính utilizationRate = kAchieved / kMax
+  2. totalFootprint = Σ(typicalArea) các tòa trong lô
+  3. Kiểm tra K constraint:
+     rawK = (totalFootprint × maxFloors) / lot.area
+     NẾU rawK > kMax:
+       globalScaleFactor = min(globalScaleFactor, kMax / rawK)
+  4. Kiểm tra Density constraint:
+     rawDensity = totalFootprint / lot.area
+     NẾU rawDensity > densityMax:
+       globalScaleFactor = min(globalScaleFactor, densityMax / rawDensity)
+
+→ Kết quả: globalScaleFactor = min trên TOÀN BỘ lô
+  (lô nào chặt nhất sẽ quyết định scale factor)
+
+──────────────────────────────────────────────────
+PASS 2: Tính kết quả với diện tích đã scale đồng nhất
+──────────────────────────────────────────────────
+FOR mỗi lô j:
+  FOR mỗi tòa trong lô:
+     adjustedTypicalArea = typicalArea × globalScaleFactor
+     commercialGFA = adjustedTypicalArea × commercialFloors
+     residentialGFA = adjustedTypicalArea × (maxFloors - commercialFloors)
+     countedGFA = commercialGFA + residentialGFA  (tính vào hệ số K)
+     deductionGFA = adjustedTypicalArea × deductionFloors  (trừ: KT, PCCC, tum...)
+     totalGFA = countedGFA + deductionGFA  (tổng thực tế)
+  kAchieved = Σ(countedGFA) / lot.area
+  utilizationRate = kAchieved / kMax
 
 OUTPUT: lotResults[], typeAggregation{}, projectTotal{}
 ```
+
+**Tại sao Global Scaling thay vì Per-Lot Scaling?**
+
+Phiên bản cũ scale riêng từng lô (mỗi lô có scale factor riêng), dẫn đến BUG: cùng mẫu tòa Z1 nhưng ở lô CC2 có diện tích 1.441 m² trong khi ở lô CC4 có diện tích 1.476 m². Điều này vi phạm ràng buộc C5 (đồng nhất mẫu tòa).
+
+Global scaling đảm bảo: `adjustedTypicalArea` của mỗi mẫu tòa là **duy nhất** trên toàn dự án, bất kể tòa đó nằm ở lô nào.
+
+**Trade-off:** Một số lô có thể chưa tận dụng hết K max (vì bị constrain bởi lô chặt nhất). Đây là đúng hành vi — muốn tối ưu hơn thì chạy **Optimizer (Phase B)**, nó sẽ tìm `typicalArea` riêng cho từng mẫu tòa (thay đổi giá trị gốc, không phải scale đồng đều).
 
 ### 3.3. Phase B — Tối ưu hóa lặp (Iterative Optimization)
 
@@ -368,11 +398,13 @@ Ví dụ: Nếu một văn bản cho phép hệ số cao hơn, văn bản đó s
 
 1. **Coupling giữa các lô:** Đây là core difficulty. Không thể tối ưu từng lô riêng rồi ghép lại. Phải tối ưu đồng thời vì các tòa cùng mẫu ở các lô khác nhau phải có cùng diện tích.
 
-2. **Hệ số K không phải mục tiêu tuyệt đối:** Mục tiêu là **maximize tổng GFA**, K chỉ là ràng buộc. Có thể 1 lô đạt 95% K_max nhưng lô khác đạt 100% → tổng vẫn tốt hơn so với mọi lô đều 97%.
+2. **Global Scaling (không phải Per-Lot):** Phase A (Direct Calculation) dùng thuật toán two-pass: Pass 1 tìm scale factor nhỏ nhất toàn dự án (lô chặt nhất quyết định), Pass 2 áp dụng 1 scale factor duy nhất cho tất cả mẫu tòa. Điều này đảm bảo invariant "cùng mẫu = cùng diện tích" ở mọi lô. Trade-off: một số lô chưa tận dụng hết K max — đây là ý nghĩa đúng của direct calculation. Muốn tối ưu hơn → chạy Optimizer (Phase B).
 
-3. **Dải chấp nhận:** Output nên là dải `[f_min, f_max]` cho mỗi mẫu, không phải 1 con số cứng. KTS cần linh hoạt để cân chỉnh theo thiết kế thực tế.
+3. **Hệ số K không phải mục tiêu tuyệt đối:** Mục tiêu là **maximize tổng GFA**, K chỉ là ràng buộc. Có thể 1 lô đạt 95% K_max nhưng lô khác đạt 100% → tổng vẫn tốt hơn so với mọi lô đều 97%.
 
-4. **Deduction rate:** Tỷ lệ trừ (kỹ thuật, PCCC, tum...) khác nhau giữa các dự án. Phase 1 dùng tỷ lệ chung, Phase 1.5 nên cho config chi tiết.
+4. **Dải chấp nhận:** Output nên là dải `[f_min, f_max]` cho mỗi mẫu, không phải 1 con số cứng. KTS cần linh hoạt để cân chỉnh theo thiết kế thực tế.
+
+5. **Deduction rate:** Tỷ lệ trừ (kỹ thuật, PCCC, tum...) khác nhau giữa các dự án. Phase 1 dùng tỷ lệ chung, Phase 1.5 nên cho config chi tiết.
 
 ### 7.2. Về pháp lý
 
