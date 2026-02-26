@@ -597,6 +597,8 @@ frontend/src/
   buildingTypes: [
     { id: "L_short", shape: "L", label: "L ngắn",
       typicalArea: 1472.67,   // DT sàn 1 tầng (m²)
+      minTypicalArea: 1200,   // DT sàn tối thiểu (m²) — ràng buộc C4
+      maxTypicalArea: 1800,   // DT sàn tối đa (m²) — ràng buộc C4
       totalFloors: 30,        // Tổng số tầng
       commercialFloors: 2,    // Số tầng TMDV
       totalGFA: 44180.1 }     // (optional) tổng DT sàn XD = typicalArea × totalFloors
@@ -721,6 +723,16 @@ frontend/src/
 ---
 
 ## 12. CHANGELOG
+
+### v2.2 (26/02/2026) — C4 Constraint: Min/Max Typical Area Bounds
+- **Add:** `minTypicalArea` / `maxTypicalArea` fields per building type — ràng buộc C4 (diện tích điển hình hợp lý)
+- **Update:** LP optimizer respects min/max bounds khi tính S_t_min = minTypicalArea × floors, S_t_max = maxTypicalArea × floors
+- **Update:** Monte Carlo fallback clamp perturbation within min/max bounds
+- **Add:** Validation warnings khi typicalArea nằm ngoài [min, max] hoặc min > max
+- **Update:** TypesTab UI hiển thị input min/max cho từng mẫu tòa
+- **Update:** SpreadsheetTab types sheet thêm cột DT min / DT max
+- **Update:** Excel export bao gồm cột DT min / DT max
+- **Impact:** Ngăn ngừa kết quả tối ưu có diện tích sàn vô lý (VD: ~2.800 m² hoặc ~600 m²)
 
 ### v2.1 (15/02/2026) — Bug Fixes
 - **Fix:** StatusBadge thiếu status "over" → hiển thị "Chưa gán" thay vì "Vượt"

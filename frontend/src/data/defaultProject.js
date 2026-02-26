@@ -155,12 +155,16 @@ export const DEFAULT_PROJECT = {
   ],
 
   // --- Building types (7 templates from Excel) ---
+  // minTypicalArea / maxTypicalArea: ràng buộc C4 — diện tích điển hình hợp lý
+  // LP solver sẽ đảm bảo kết quả tối ưu nằm trong khoảng [min, max]
   buildingTypes: [
     {
       id: "L_short",
       shape: "L",
       label: "L ngắn",
       typicalArea: 1472.67,  // DT sàn điển hình (m²)
+      minTypicalArea: 1200,  // DT sàn tối thiểu (m²)
+      maxTypicalArea: 1800,  // DT sàn tối đa (m²)
       totalFloors: 30,       // 2 TMDV + 28 ở
       commercialFloors: 2,
       variants: [],
@@ -171,6 +175,8 @@ export const DEFAULT_PROJECT = {
       shape: "L",
       label: "L dài",
       typicalArea: 1778.53,
+      minTypicalArea: 1400,
+      maxTypicalArea: 2100,
       totalFloors: 30,
       commercialFloors: 2,
       variants: [],
@@ -181,6 +187,8 @@ export const DEFAULT_PROJECT = {
       shape: "Z",
       label: "Z",
       typicalArea: 1472.67,
+      minTypicalArea: 1200,
+      maxTypicalArea: 1800,
       totalFloors: 30,
       commercialFloors: 2,
       variants: [],
@@ -191,6 +199,8 @@ export const DEFAULT_PROJECT = {
       shape: "I",
       label: "I1",
       typicalArea: 1472.67,
+      minTypicalArea: 1200,
+      maxTypicalArea: 1800,
       totalFloors: 30,
       commercialFloors: 2,
       variants: [],
@@ -201,6 +211,8 @@ export const DEFAULT_PROJECT = {
       shape: "I",
       label: "I2",
       typicalArea: 1685.84,
+      minTypicalArea: 1300,
+      maxTypicalArea: 2000,
       totalFloors: 30,
       commercialFloors: 2,
       variants: [],
@@ -211,6 +223,8 @@ export const DEFAULT_PROJECT = {
       shape: "I",
       label: "I3",
       typicalArea: 1620.00,
+      minTypicalArea: 1200,
+      maxTypicalArea: 2000,
       totalFloors: 8,        // 1 TMDV + 7 ở (thấp tầng)
       commercialFloors: 1,
       variants: [],
@@ -221,6 +235,8 @@ export const DEFAULT_PROJECT = {
       shape: "SQ",
       label: "Vuông",
       typicalArea: 1188.16,
+      minTypicalArea: 900,
+      maxTypicalArea: 1500,
       totalFloors: 30,
       commercialFloors: 2,
       variants: [],

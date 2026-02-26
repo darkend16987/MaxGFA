@@ -43,13 +43,25 @@ export function runLPOptimization(project, options = {}) {
     currentS[bt.id] = bt.totalGFA || bt.typicalArea * floors;
   });
 
-  // Set bounds: allow ±boundsRange around current S_t
+  // Set bounds: use minTypicalArea/maxTypicalArea if specified (C4 constraint),
+  // otherwise fall back to ±boundsRange around current S_t
   const boundsMin = {};
   const boundsMax = {};
   buildingTypes.forEach((bt) => {
     const S = currentS[bt.id];
-    boundsMin[bt.id] = S * (1 - boundsRange);
-    boundsMax[bt.id] = S * (1 + boundsRange);
+    const floors = bt.totalFloors || lots[0]?.maxFloors || 30;
+
+    if (bt.minTypicalArea > 0) {
+      boundsMin[bt.id] = bt.minTypicalArea * floors;
+    } else {
+      boundsMin[bt.id] = S * (1 - boundsRange);
+    }
+
+    if (bt.maxTypicalArea > 0) {
+      boundsMax[bt.id] = bt.maxTypicalArea * floors;
+    } else {
+      boundsMax[bt.id] = S * (1 + boundsRange);
+    }
   });
 
   // Override with user-specified bounds if any
@@ -156,12 +168,20 @@ export function runIterativeOptimization(project, options = {}) {
 
   for (let i = 0; i < iterations; i++) {
     // Generate trial: perturb each building type's typical area (and totalGFA if set)
+    // Clamp to minTypicalArea/maxTypicalArea if specified (C4 constraint)
     const trialTypes = buildingTypes.map((bt) => {
       const factor = 1 - perturbationRange + Math.random() * perturbationRange * 2;
+      let newArea = bt.typicalArea * factor;
+
+      // Clamp to min/max bounds
+      if (bt.minTypicalArea > 0) newArea = Math.max(newArea, bt.minTypicalArea);
+      if (bt.maxTypicalArea > 0) newArea = Math.min(newArea, bt.maxTypicalArea);
+
+      const floors = bt.totalFloors || 30;
       return {
         ...bt,
-        typicalArea: bt.typicalArea * factor,
-        ...(bt.totalGFA ? { totalGFA: bt.totalGFA * factor } : {}),
+        typicalArea: newArea,
+        ...(bt.totalGFA ? { totalGFA: newArea * floors } : {}),
       };
     });
 
