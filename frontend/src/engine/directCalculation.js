@@ -273,5 +273,18 @@ export function validateProject(project) {
     }
   });
 
+  // Check typicalArea within min/max bounds (C4 constraint)
+  buildingTypes.forEach((bt) => {
+    if (bt.minTypicalArea > 0 && bt.maxTypicalArea > 0 && bt.minTypicalArea > bt.maxTypicalArea) {
+      issues.push({ level: "error", message: `Mẫu ${bt.label}: DT tối thiểu (${bt.minTypicalArea}) > DT tối đa (${bt.maxTypicalArea})` });
+    }
+    if (bt.minTypicalArea > 0 && bt.typicalArea < bt.minTypicalArea) {
+      issues.push({ level: "warning", message: `Mẫu ${bt.label}: DT điển hình (${bt.typicalArea.toFixed(0)} m²) thấp hơn giới hạn tối thiểu (${bt.minTypicalArea} m²)` });
+    }
+    if (bt.maxTypicalArea > 0 && bt.typicalArea > bt.maxTypicalArea) {
+      issues.push({ level: "warning", message: `Mẫu ${bt.label}: DT điển hình (${bt.typicalArea.toFixed(0)} m²) cao hơn giới hạn tối đa (${bt.maxTypicalArea} m²)` });
+    }
+  });
+
   return issues;
 }

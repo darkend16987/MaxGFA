@@ -22,6 +22,8 @@ export default function TypesTab({ project, setProject }) {
       shape: "I",
       label,
       typicalArea: 1200,
+      minTypicalArea: 800,
+      maxTypicalArea: 1600,
       variants: [],
       description: "",
     };
@@ -180,6 +182,37 @@ export default function TypesTab({ project, setProject }) {
                   </select>
                 </div>
               </div>
+
+              {/* Min/Max typical area bounds — ràng buộc C4 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                <ConfigInput
+                  label="DT sàn tối thiểu"
+                  value={bt.minTypicalArea || ""}
+                  onChange={(v) => updateBuildingType(bt.id, "minTypicalArea", v)}
+                  suffix="m²"
+                />
+                <ConfigInput
+                  label="DT sàn tối đa"
+                  value={bt.maxTypicalArea || ""}
+                  onChange={(v) => updateBuildingType(bt.id, "maxTypicalArea", v)}
+                  suffix="m²"
+                />
+              </div>
+              {bt.minTypicalArea > 0 && bt.maxTypicalArea > 0 && bt.minTypicalArea > bt.maxTypicalArea && (
+                <div style={{ fontSize: 11, color: colors.red, marginBottom: 8 }}>
+                  DT tối thiểu phải nhỏ hơn DT tối đa
+                </div>
+              )}
+              {bt.minTypicalArea > 0 && bt.typicalArea < bt.minTypicalArea && (
+                <div style={{ fontSize: 11, color: colors.amber, marginBottom: 8 }}>
+                  DT điển hình hiện tại thấp hơn giới hạn tối thiểu
+                </div>
+              )}
+              {bt.maxTypicalArea > 0 && bt.typicalArea > bt.maxTypicalArea && (
+                <div style={{ fontSize: 11, color: colors.amber, marginBottom: 8 }}>
+                  DT điển hình hiện tại cao hơn giới hạn tối đa
+                </div>
+              )}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <ConfigInput

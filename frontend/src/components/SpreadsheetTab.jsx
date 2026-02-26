@@ -415,6 +415,8 @@ function SheetTypes({ project, setProject, result }) {
             <th style={headerCell}>Ten</th>
             <th style={headerCell}>Hinh dang</th>
             <th style={{ ...headerCell, color: colors.cyan }}>DT dien hinh (m2)</th>
+            <th style={{ ...headerCell, color: colors.amber }}>DT min (m2)</th>
+            <th style={{ ...headerCell, color: colors.amber }}>DT max (m2)</th>
             <th style={{ ...headerCell, color: colors.greenLight }}>So luong</th>
             <th style={{ ...headerCell, color: colors.greenLight }}>Cac lo</th>
             <th style={{ ...headerCell, color: colors.greenLight }}>Tong DT K (m2)</th>
@@ -465,6 +467,30 @@ function SheetTypes({ project, setProject, result }) {
                     }
                     style={{ ...inputCell, color: colors.cyan }}
                     step="any"
+                  />
+                </td>
+                <td style={{ ...cellBase, padding: "2px 4px" }}>
+                  <input
+                    type="number"
+                    value={bt.minTypicalArea || ""}
+                    onChange={(e) =>
+                      updateType(bt.id, "minTypicalArea", parseFloat(e.target.value) || 0)
+                    }
+                    style={{ ...inputCell, color: colors.amber }}
+                    step="any"
+                    placeholder="—"
+                  />
+                </td>
+                <td style={{ ...cellBase, padding: "2px 4px" }}>
+                  <input
+                    type="number"
+                    value={bt.maxTypicalArea || ""}
+                    onChange={(e) =>
+                      updateType(bt.id, "maxTypicalArea", parseFloat(e.target.value) || 0)
+                    }
+                    style={{ ...inputCell, color: colors.amber }}
+                    step="any"
+                    placeholder="—"
                   />
                 </td>
                 <td style={computedCell}>{agg?.count || 0}</td>
