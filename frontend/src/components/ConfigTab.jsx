@@ -42,11 +42,7 @@ export default function ConfigTab({ project, setProject }) {
     }));
   };
 
-  const updateAssignment = (lotId, buildingsStr) => {
-    const buildings = buildingsStr
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+  const updateAssignmentArray = (lotId, buildings) => {
     setProject((p) => ({
       ...p,
       assignments: p.assignments.map((a) => (a.lotId === lotId ? { ...a, buildings } : a)),
@@ -189,21 +185,53 @@ export default function ConfigTab({ project, setProject }) {
             <span style={{ fontSize: 14, fontWeight: 700, color: colors.textPrimary, fontFamily: fonts.mono }}>
               Lô {a.lotId}
             </span>
-            <input
-              type="text"
-              value={a.buildings.join(", ")}
-              onChange={(e) => updateAssignment(a.lotId, e.target.value)}
-              style={{
-                background: colors.borderLight,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 6,
-                color: colors.textPrimary,
-                padding: "8px 12px",
-                fontSize: 13,
-                fontFamily: fonts.mono,
-                outline: "none",
-              }}
-            />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", background: colors.borderLight, padding: "8px 12px", borderRadius: 6, border: `1px solid ${colors.border}` }}>
+              {a.buildings.map((bId, idx) => {
+                const bType = project.buildingTypes.find(bt => bt.id === bId);
+                const bName = bType ? bType.name : bId;
+                return (
+                  <div key={`${bId}-${idx}`} style={{ display: "flex", alignItems: "center", background: `${colors.green}22`, border: `1px solid ${colors.green}44`, color: colors.green, padding: "4px 8px", borderRadius: 4, fontSize: 13, fontWeight: 600 }}>
+                    <span>{bName} ({bId})</span>
+                    <button
+                      onClick={() => {
+                        const newBuildings = [...a.buildings];
+                        newBuildings.splice(idx, 1);
+                        updateAssignmentArray(a.lotId, newBuildings);
+                      }}
+                      style={{ background: "transparent", border: "none", color: "inherit", marginLeft: 6, cursor: "pointer", fontSize: 16, fontWeight: "bold", padding: "0 2px", lineHeight: 1 }}
+                      title="Xóa"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+              
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) {
+                    updateAssignmentArray(a.lotId, [...a.buildings, e.target.value]);
+                  }
+                }}
+                style={{
+                  background: colors.bgCard,
+                  border: `1px dashed ${colors.border}`,
+                  borderRadius: 4,
+                  color: colors.textSecondary,
+                  padding: "4px 8px",
+                  fontSize: 13,
+                  outline: "none",
+                  cursor: "pointer",
+                  fontFamily: fonts.sans,
+                }}
+              >
+                <option value="">+ Thêm tòa nhà...</option>
+                {project.buildingTypes.map(bt => (
+                  <option key={bt.id} value={bt.id}>{bt.name} ({bt.id})</option>
+                ))}
+              </select>
+            </div>
           </div>
         ))}
       </div>
