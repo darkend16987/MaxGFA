@@ -24,6 +24,7 @@ export default function ConfigTab({ project, setProject }) {
       densityMax: 0.40,
       maxFloors: 30,
       minFloors: 3,
+      maxPopulation: 0,
       notes: "",
     };
     setProject((p) => ({
@@ -96,6 +97,18 @@ export default function ConfigTab({ project, setProject }) {
           onChange={(v) => setProject((p) => ({ ...p, settings: { ...p.settings, kTargetMin: v } }))}
           suffix="x Kmax"
         />
+        <ConfigInput
+          label="Hệ số thông thủy"
+          value={project.settings.netAreaRatio ?? 0.9}
+          onChange={(v) => setProject((p) => ({ ...p, settings: { ...p.settings, netAreaRatio: v } }))}
+          suffix="x"
+        />
+        <ConfigInput
+          label="DT ở / người"
+          value={project.settings.areaPerPerson ?? 32}
+          onChange={(v) => setProject((p) => ({ ...p, settings: { ...p.settings, areaPerPerson: v } }))}
+          suffix="m²"
+        />
       </div>
 
       {/* Lot Configuration */}
@@ -148,6 +161,7 @@ export default function ConfigTab({ project, setProject }) {
               <ConfigInput label="K max" value={lot.kMax} onChange={(v) => updateLot(lot.id, "kMax", v)} suffix="lần" small />
               <ConfigInput label="MĐXD max" value={lot.densityMax} onChange={(v) => updateLot(lot.id, "densityMax", v)} small />
               <ConfigInput label="Tầng max" value={lot.maxFloors} onChange={(v) => updateLot(lot.id, "maxFloors", v)} suffix="tầng" small />
+              <ConfigInput label="Dân số max" value={lot.maxPopulation || ""} onChange={(v) => updateLot(lot.id, "maxPopulation", v)} suffix="người" small />
               <button
                 onClick={(e) => {
                   e.stopPropagation();

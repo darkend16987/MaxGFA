@@ -20,6 +20,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.20,
       maxFloors: 30,
       minFloors: 3,
+      maxPopulation: 2978,
       notes: "NOXH-01: 2×L ngắn + 1×I1",
     },
     {
@@ -30,6 +31,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.17,
       maxFloors: 30,
       minFloors: 3,
+      maxPopulation: 1986,
       notes: "NOXH-01: 2×Z",
     },
     {
@@ -40,6 +42,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.22,
       maxFloors: 30,
       minFloors: 3,
+      maxPopulation: 3971,
       notes: "NOXH-01: 4×Z",
     },
     {
@@ -50,6 +53,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.23,
       maxFloors: 30,
       minFloors: 3,
+      maxPopulation: 3971,
       notes: "NOXH-02: 2×L ngắn + 2×Z",
     },
     {
@@ -60,6 +64,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.22,
       maxFloors: 30,
       minFloors: 3,
+      maxPopulation: 3409,
       notes: "NOXH-02: 3×I2",
     },
     {
@@ -70,6 +75,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.27,
       maxFloors: 30,
       minFloors: 3,
+      maxPopulation: 3999,
       notes: "NOXH-02: 2×L dài + 2×Vuông",
     },
     {
@@ -80,6 +86,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.21,
       maxFloors: 30,
       minFloors: 3,
+      maxPopulation: 2978,
       notes: "NOXH-03: 3×Z",
     },
     {
@@ -90,6 +97,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.20,
       maxFloors: 30,
       minFloors: 3,
+      maxPopulation: 2978,
       notes: "NOXH-03: 2×L ngắn + 1×I1",
     },
     {
@@ -100,6 +108,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.43,
       maxFloors: 8,
       minFloors: 1,
+      maxPopulation: 273,
       notes: "NOXH-04: 1×I3",
     },
     {
@@ -110,6 +119,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.43,
       maxFloors: 8,
       minFloors: 1,
+      maxPopulation: 273,
       notes: "NOXH-05: 1×I3",
     },
     {
@@ -120,6 +130,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.43,
       maxFloors: 8,
       minFloors: 1,
+      maxPopulation: 273,
       notes: "NOXH-05: 1×I3",
     },
     {
@@ -130,6 +141,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.43,
       maxFloors: 8,
       minFloors: 1,
+      maxPopulation: 273,
       notes: "NOXH-06: 1×I3",
     },
     {
@@ -140,6 +152,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.43,
       maxFloors: 8,
       minFloors: 1,
+      maxPopulation: 273,
       notes: "NOXH-07: 1×I3",
     },
     {
@@ -150,6 +163,7 @@ export const DEFAULT_PROJECT = {
       densityMax: 0.43,
       maxFloors: 8,
       minFloors: 1,
+      maxPopulation: 273,
       notes: "NOXH-08: 1×I3",
     },
   ],
@@ -269,6 +283,9 @@ export const DEFAULT_PROJECT = {
     kTargetMin: 0.90,       // Ngưỡng K tối thiểu (% of Kmax) cho status "optimal"
     optimizationIterations: 800,
     perturbationRange: 0.08,
+    // Population constraint settings
+    netAreaRatio: 0.9,      // Hệ số quy đổi DT sàn XD → DT thông thủy (0.87-0.92 tùy dự án)
+    areaPerPerson: 32,      // Diện tích ở tối thiểu / người (m²) — theo quy hoạch
   },
 };
 
@@ -286,6 +303,8 @@ export function createBlankProject() {
       kTargetMin: 0.90,
       optimizationIterations: 800,
       perturbationRange: 0.08,
+      netAreaRatio: 0.9,
+      areaPerPerson: 32,
     },
   };
 }

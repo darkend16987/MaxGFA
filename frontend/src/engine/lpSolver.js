@@ -229,10 +229,10 @@ export function solveLP(c, A, b, lb = null, ub = null) {
  * @returns {Object} { status, solution, totalGFA, lotDetails, bindingLots }
  */
 export function solveGFAOptimization(problem) {
-  const { lots, types, assignments, bounds = {} } = problem;
+  const { lots, types, assignments, bounds = {}, populationSettings } = problem;
 
   const n = types.length; // number of variables (one S_t per type)
-  const m = lots.length;  // number of lot constraints
+  const m = lots.length;  // number of lot K constraints
 
   // Type index map
   const typeIndex = new Map();
@@ -249,10 +249,10 @@ export function solveGFAOptimization(problem) {
 
   // --- Build constraints: per-lot K limits ---
   // For lot j: Σ_t (n_tj × S_t) ≤ area_j × k_max_j
-  const A = new Array(m);
-  const b = new Array(m);
+  const A_rows = [];
+  const b_rows = [];
 
-  lots.forEach((lot, j) => {
+  lots.forEach((lot) => {
     const row = new Array(n).fill(0);
     const assignment = assignments.find((a) => a.lotId === lot.id);
     if (assignment) {
@@ -261,9 +261,47 @@ export function solveGFAOptimization(problem) {
         if (idx !== undefined) row[idx]++;
       });
     }
-    A[j] = row;
-    b[j] = lot.area * lot.kMax;
+    A_rows.push(row);
+    b_rows.push(lot.area * lot.kMax);
   });
+
+  // --- Population constraints (if maxPopulation is set) ---
+  // For lot j: Σ_t (n_tj × S_t / totalFloors_t × residentialFloors_t × netAreaRatio / areaPerPerson) ≤ maxPop_j
+  // Rewrite as: Σ_t (n_tj × S_t × coeff_t) ≤ maxPop_j
+  //   where coeff_t = residentialFloors_t / totalFloors_t × netAreaRatio / areaPerPerson
+  const popSettings = populationSettings || {};
+  const netAreaRatio = popSettings.netAreaRatio ?? 0.9;
+  const areaPerPerson = popSettings.areaPerPerson ?? 32;
+  let popConstraintCount = 0;
+
+  lots.forEach((lot) => {
+    if (!lot.maxPopulation || lot.maxPopulation <= 0) return;
+
+    const row = new Array(n).fill(0);
+    const assignment = assignments.find((a) => a.lotId === lot.id);
+    if (assignment) {
+      assignment.buildings.forEach((typeId) => {
+        const idx = typeIndex.get(typeId);
+        if (idx !== undefined) {
+          const t = types[idx];
+          const totalFloors = t.totalFloors || 30;
+          const residentialFloors = t.residentialFloors || (totalFloors - (t.commercialFloors ?? 2));
+          // S_t = typicalArea × totalFloors, so typicalArea = S_t / totalFloors
+          // population contribution = typicalArea × residentialFloors × netAreaRatio / areaPerPerson
+          //                         = S_t / totalFloors × residentialFloors × netAreaRatio / areaPerPerson
+          const coeff = (residentialFloors / totalFloors) * netAreaRatio / areaPerPerson;
+          row[idx] += coeff;
+        }
+      });
+    }
+    A_rows.push(row);
+    b_rows.push(lot.maxPopulation);
+    popConstraintCount++;
+  });
+
+  const totalConstraints = m + popConstraintCount;
+  const A = A_rows;
+  const b = b_rows;
 
   // --- Variable bounds ---
   const lb = new Array(n);
@@ -312,7 +350,7 @@ export function solveGFAOptimization(problem) {
 
     const kAchieved = lot.area > 0 ? totalGFA / lot.area : 0;
     const utilization = lot.kMax > 0 ? kAchieved / lot.kMax : 0;
-    const isBinding = result.bindingConstraints.includes(j);
+    const isBindingK = result.bindingConstraints.includes(j);
 
     return {
       lotId: lot.id,
@@ -325,14 +363,25 @@ export function solveGFAOptimization(problem) {
       remainingGFA: lot.area * lot.kMax - totalGFA,
       buildingCount: buildings.length,
       buildings: buildingDetails,
-      isBinding, // true = this lot is a bottleneck constraint
+      isBinding: isBindingK, // true = this lot is a K bottleneck
     };
   });
 
-  // Binding lots (bottleneck constraints)
+  // Binding lots (bottleneck K constraints only, not population)
   const bindingLots = result.bindingConstraints
     .filter((i) => i < m)
     .map((i) => lots[i].id);
+
+  // Binding population constraints
+  const bindingPopLots = result.bindingConstraints
+    .filter((i) => i >= m && i < totalConstraints)
+    .map((i) => {
+      // Find the corresponding lot (population constraints are in same order, but only for lots with maxPopulation)
+      const popLots = lots.filter(l => l.maxPopulation > 0);
+      const popIdx = i - m;
+      return popIdx < popLots.length ? popLots[popIdx].id : null;
+    })
+    .filter(Boolean);
 
   return {
     status: 'optimal',
@@ -340,6 +389,7 @@ export function solveGFAOptimization(problem) {
     totalGFA: result.objectiveValue,
     lotDetails,
     bindingLots,    // which lots are at their K limit
+    bindingPopLots, // which lots are at their population limit
   };
 }
 

@@ -107,9 +107,21 @@ export function calculateGFA(project) {
     const isOverK = kAchieved > lot.kMax * 1.001; // small tolerance
     const isOverDensity = lot.densityMax > 0 && densityAchieved > lot.densityMax * 1.001;
 
+    // Population calculation
+    // Formula: population = Σ (typicalArea × residentialFloors × netAreaRatio / areaPerPerson)
+    const netAreaRatio = settings.netAreaRatio ?? 0.9;
+    const areaPerPerson = settings.areaPerPerson ?? 32;
+    const totalResidentialGFA = buildingDetails.reduce((s, b) => s + b.typicalArea * b.residentialFloors, 0);
+    const populationCalc = areaPerPerson > 0
+      ? totalResidentialGFA * netAreaRatio / areaPerPerson
+      : 0;
+    const maxPopulation = lot.maxPopulation || 0;
+    const isOverPopulation = maxPopulation > 0 && populationCalc > maxPopulation * 1.001;
+    const populationUtilization = maxPopulation > 0 ? populationCalc / maxPopulation : 0;
+
     // Status determination
     let status = "low";
-    if (isOverK || isOverDensity) status = "over";
+    if (isOverK || isOverDensity || isOverPopulation) status = "over";
     else if (utilizationRate >= kTargetMin) status = "optimal";
     else if (utilizationRate >= 0.80) status = "good";
 
@@ -129,7 +141,13 @@ export function calculateGFA(project) {
       maxFloors: lot.maxFloors,
       isOverK,
       isOverDensity,
+      isOverPopulation,
       wasScaled: false,
+      // Population metrics
+      populationCalc,
+      maxPopulation,
+      populationUtilization,
+      totalResidentialGFA,
       // Additional metrics
       remainingKCapacity: lot.kMax - kAchieved,
       remainingDensityCapacity: lot.densityMax > 0 ? lot.densityMax - densityAchieved : Infinity,
@@ -184,6 +202,9 @@ export function calculateGFA(project) {
       ? activeLots.reduce((s, lr) => s + lr.utilizationRate, 0) / activeLots.length
       : 0;
 
+  const totalPopulation = lotResults.reduce((s, lr) => s + (lr.populationCalc || 0), 0);
+  const totalMaxPopulation = lots.reduce((s, l) => s + (l.maxPopulation || 0), 0);
+
   const projectTotal = {
     totalCountedGFA,
     totalActualGFA,
@@ -195,6 +216,8 @@ export function calculateGFA(project) {
     globalScaleFactor: 1, // backward compat — no scaling
     combinedFAR: avgK,
     combinedFARCompliant: avgK <= 13,
+    totalPopulation,
+    totalMaxPopulation,
   };
 
   return { lotResults, typeAggregation, projectTotal };
@@ -217,7 +240,12 @@ function createEmptyLotResult(lot) {
     maxFloors: lot.maxFloors,
     isOverK: false,
     isOverDensity: false,
+    isOverPopulation: false,
     wasScaled: false,
+    populationCalc: 0,
+    maxPopulation: lot.maxPopulation || 0,
+    populationUtilization: 0,
+    totalResidentialGFA: 0,
     remainingKCapacity: lot.kMax,
     remainingDensityCapacity: lot.densityMax,
     maxAllowableGFA: lot.area * lot.kMax,

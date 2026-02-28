@@ -71,10 +71,19 @@ export function runLPOptimization(project, options = {}) {
   }
 
   const problem = {
-    lots: lots.map((l) => ({ id: l.id, area: l.area, kMax: l.kMax })),
-    types,
+    lots: lots.map((l) => ({ id: l.id, area: l.area, kMax: l.kMax, maxPopulation: l.maxPopulation || 0 })),
+    types: types.map((t, i) => ({
+      ...t,
+      // Pass floor info needed for population constraint
+      residentialFloors: buildingTypes[i].totalFloors - (buildingTypes[i].commercialFloors ?? settings.commercialFloors ?? 2),
+      commercialFloors: buildingTypes[i].commercialFloors ?? settings.commercialFloors ?? 2,
+    })),
     assignments,
     bounds: { min: boundsMin, max: boundsMax },
+    populationSettings: {
+      netAreaRatio: settings.netAreaRatio ?? 0.9,
+      areaPerPerson: settings.areaPerPerson ?? 32,
+    },
   };
 
   // Solve LP
