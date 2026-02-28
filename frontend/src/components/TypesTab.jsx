@@ -24,6 +24,8 @@ export default function TypesTab({ project, setProject }) {
       typicalArea: 1200,
       minTypicalArea: 800,
       maxTypicalArea: 1600,
+      totalFloors: 30,
+      commercialFloors: 2,
       variants: [],
       description: "",
     };
@@ -213,6 +215,39 @@ export default function TypesTab({ project, setProject }) {
                   DT điển hình hiện tại cao hơn giới hạn tối đa
                 </div>
               )}
+
+              {/* Floor breakdown — Tầng ở / Tầng TMDV */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
+                <ConfigInput
+                  label="Tổng số tầng"
+                  value={bt.totalFloors || ""}
+                  onChange={(v) => updateBuildingType(bt.id, "totalFloors", v)}
+                  suffix="tầng"
+                />
+                <ConfigInput
+                  label="Tầng TMDV"
+                  value={bt.commercialFloors ?? ""}
+                  onChange={(v) => updateBuildingType(bt.id, "commercialFloors", v)}
+                  suffix="tầng"
+                />
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 10, color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Tầng ở (tính dân)
+                  </label>
+                  <div style={{
+                    padding: "8px 12px",
+                    fontSize: 14,
+                    fontFamily: fonts.mono,
+                    color: colors.cyan,
+                    fontWeight: 600,
+                    background: `${colors.cyan}11`,
+                    borderRadius: 6,
+                    border: `1px solid ${colors.cyan}33`,
+                  }}>
+                    {(bt.totalFloors || 0) - (bt.commercialFloors ?? 0)} tầng
+                  </div>
+                </div>
+              </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <ConfigInput

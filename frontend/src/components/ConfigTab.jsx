@@ -153,35 +153,41 @@ export default function ConfigTab({ project, setProject }) {
 
       <div style={{ display: "grid", gap: 12 }}>
         {project.lots.map((lot) => (
-          <div key={lot.id} style={{ background: colors.bgCard, borderRadius: 12, padding: 16 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 120px 100px 100px 100px 40px", gap: 12, alignItems: "end" }}>
-              <ConfigInput label="Ký hiệu" value={lot.id} onChange={(v) => updateLot(lot.id, "id", v)} type="text" small />
-              <ConfigInput label="Tên lô" value={lot.name} onChange={(v) => updateLot(lot.id, "name", v)} type="text" small />
-              <ConfigInput label="Diện tích" value={lot.area} onChange={(v) => updateLot(lot.id, "area", v)} suffix="m²" small />
-              <ConfigInput label="K max" value={lot.kMax} onChange={(v) => updateLot(lot.id, "kMax", v)} suffix="lần" small />
-              <ConfigInput label="MĐXD max" value={lot.densityMax} onChange={(v) => updateLot(lot.id, "densityMax", v)} small />
-              <ConfigInput label="Tầng max" value={lot.maxFloors} onChange={(v) => updateLot(lot.id, "maxFloors", v)} suffix="tầng" small />
-              <ConfigInput label="Dân số max" value={lot.maxPopulation || ""} onChange={(v) => updateLot(lot.id, "maxPopulation", v)} suffix="người" small />
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeLot(lot.id);
-                }}
-                style={{
-                  background: `${colors.red}22`,
-                  border: `1px solid ${colors.red}44`,
-                  borderRadius: 6,
-                  color: colors.red,
-                  cursor: "pointer",
-                  padding: "4px 0",
-                  fontSize: 14,
-                  alignSelf: "end",
-                  marginBottom: 1,
-                }}
-                title="Xóa lô đất"
-              >
-                ×
-              </button>
+          <div key={lot.id} style={{ background: colors.bgCard, borderRadius: 12, padding: "16px 20px", position: "relative" }}>
+            {/* Remove button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                removeLot(lot.id);
+              }}
+              style={{
+                position: "absolute",
+                top: 12,
+                right: 12,
+                background: `${colors.red}22`,
+                border: `1px solid ${colors.red}44`,
+                borderRadius: 6,
+                color: colors.red,
+                cursor: "pointer",
+                padding: "2px 8px",
+                fontSize: 12,
+              }}
+              title="Xóa lô đất"
+            >
+              ×
+            </button>
+            {/* Row 1: Identity + Land */}
+            <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 160px", gap: 16, marginBottom: 12 }}>
+              <ConfigInput label="Ký hiệu" value={lot.id} onChange={(v) => updateLot(lot.id, "id", v)} type="text" />
+              <ConfigInput label="Tên lô" value={lot.name} onChange={(v) => updateLot(lot.id, "name", v)} type="text" />
+              <ConfigInput label="Diện tích đất" value={lot.area} onChange={(v) => updateLot(lot.id, "area", v)} suffix="m²" />
+            </div>
+            {/* Row 2: Constraints */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16 }}>
+              <ConfigInput label="K max" value={lot.kMax} onChange={(v) => updateLot(lot.id, "kMax", v)} suffix="lần" />
+              <ConfigInput label="MĐXD max" value={lot.densityMax} onChange={(v) => updateLot(lot.id, "densityMax", v)} />
+              <ConfigInput label="Tầng max" value={lot.maxFloors} onChange={(v) => updateLot(lot.id, "maxFloors", v)} suffix="tầng" />
+              <ConfigInput label="Dân số tối đa" value={lot.maxPopulation || ""} onChange={(v) => updateLot(lot.id, "maxPopulation", v)} suffix="người" placeholder="0 = không giới hạn" />
             </div>
           </div>
         ))}
