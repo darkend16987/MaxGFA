@@ -71,7 +71,7 @@ export default function LotCard({ lotResult, expanded, onToggle }) {
       </div>
 
       {/* Metrics Row */}
-      <div style={{ padding: "0 20px 16px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+      <div style={{ padding: "0 20px 16px", display: "grid", gridTemplateColumns: lr.maxPopulation > 0 ? "1fr 1fr 1fr 1fr" : "1fr 1fr 1fr", gap: 12 }}>
         {/* K ratio */}
         <div
           title={"Hệ số sử dụng đất = Tổng DT sàn tính K / DT đất lô\n= " + fmtNum(lr.totalCountedGFA, 0) + " / " + fmtNum(lr.lot.area, 0) + " = " + lr.kAchieved.toFixed(3) + "\nRàng buộc: K ≤ " + lr.kMax.toFixed(2) + " (QCVN)"}
@@ -114,6 +114,22 @@ export default function LotCard({ lotResult, expanded, onToggle }) {
           <div style={{ fontSize: 10, color: colors.textMuted }}>m²</div>
           <MiniBar value={lr.utilizationRate} max={1} color={colors.green} />
         </div>
+        {/* Population */}
+        {lr.maxPopulation > 0 && (
+          <div
+            title={`Dân số = Σ(DT điển hình × tầng ở × hệ số thông thủy / DT/người)\n= ${fmtNum(lr.populationCalc, 0)} người\nGiới hạn: ${fmtNum(lr.maxPopulation, 0)} người`}
+            style={{ cursor: "help" }}
+          >
+            <div style={{ fontSize: 10, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
+              Dân số
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: lr.isOverPopulation ? colors.red : colors.textPrimary, fontFamily: fonts.mono }}>
+              {fmtNum(lr.populationCalc, 0)}
+            </div>
+            <div style={{ fontSize: 10, color: colors.textMuted }}>/ {fmtNum(lr.maxPopulation, 0)} max</div>
+            <MiniBar value={lr.populationCalc} max={lr.maxPopulation} color={colors.amber} />
+          </div>
+        )}
       </div>
 
       {/* Expanded detail */}

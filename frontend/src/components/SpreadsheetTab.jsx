@@ -223,12 +223,14 @@ function SheetLots({ project, setProject, result }) {
     { key: "kMax", label: "K max", width: 70, editable: true, type: "number" },
     { key: "densityMax", label: "MDXD max", width: 85, editable: true, type: "number" },
     { key: "maxFloors", label: "Tang max", width: 75, editable: true, type: "number" },
+    { key: "maxPopulation", label: "Dan so max", width: 90, editable: true, type: "number" },
     { key: "buildings", label: "Toa nha (phan bo)", width: 200, editable: true, type: "text" },
     { key: "_kAchieved", label: "K dat", width: 70, computed: true },
     { key: "_kUsage", label: "% K", width: 65, computed: true },
     { key: "_density", label: "MDXD %", width: 70, computed: true },
     { key: "_gfa", label: "DT san K (m2)", width: 120, computed: true },
     { key: "_gfaActual", label: "DT san thuc (m2)", width: 120, computed: true },
+    { key: "_population", label: "Dan so", width: 80, computed: true },
     { key: "_status", label: "Trang thai", width: 80, computed: true },
   ];
 
@@ -294,9 +296,14 @@ function SheetLots({ project, setProject, result }) {
                         case "_gfaActual":
                           value = fmtNum(lr.totalActualGFA, 0);
                           break;
+                        case "_population":
+                          value = lr.populationCalc > 0 ? fmtNum(lr.populationCalc, 0) : "—";
+                          if (lr.isOverPopulation) color = colors.red;
+                          else if (lr.maxPopulation > 0) color = colors.amber;
+                          break;
                         case "_status": {
-                          const statusLabels = { optimal: "Toi uu", good: "Kha", low: "Thap", unassigned: "—" };
-                          const statusColors = { optimal: colors.green, good: colors.amber, low: colors.red, unassigned: colors.textDim };
+                          const statusLabels = { optimal: "Toi uu", good: "Kha", low: "Thap", over: "Vuot", unassigned: "—" };
+                          const statusColors = { optimal: colors.green, good: colors.amber, low: colors.red, over: colors.red, unassigned: colors.textDim };
                           value = statusLabels[lr.status] || "—";
                           color = statusColors[lr.status] || colors.textDim;
                           break;
@@ -331,7 +338,7 @@ function SheetLots({ project, setProject, result }) {
                       <td key={col.key} style={{ ...cellBase, padding: "2px 4px" }}>
                         <input
                           type={col.type || "text"}
-                          value={lot[col.key]}
+                          value={lot[col.key] ?? ""}
                           onChange={(e) => {
                             const v = col.type === "number"
                               ? parseFloat(e.target.value) || 0
